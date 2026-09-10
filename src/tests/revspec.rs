@@ -223,6 +223,14 @@ fn empty_revspec_range_reports_no_match() -> TestResult {
 #[case("heads/master", "heads/master")]
 #[case("header", "header")]
 #[case("refs/heads/head", "refs/heads/head")]
+#[case("TT-001-passthrough-http-head", "TT-001-passthrough-http-head")]
+#[case("TT-001-passthrough-http-head~1", "TT-001-passthrough-http-head~1")]
+#[case("feature/head", "feature/head")]
+#[case("head-2", "head-2")]
+#[case(
+    "head..TT-001-passthrough-http-head",
+    "HEAD..TT-001-passthrough-http-head"
+)]
 #[case("v1.0.0", "v1.0.0")]
 #[case("--first-parent", "--first-parent")]
 fn lowercase_head_is_normalized(#[case] revspec: &str, #[case] expected: &str) {
