@@ -21,6 +21,8 @@ impl<'a> GitRepository<'a> {
         }
     }
 
+    /// Applies to every git command, not just commits. Author and committer stay separate so the
+    /// `.mailmap` cases can assert the two are rewritten independently.
     pub(crate) fn with_identities(
         mut self,
         author_name: &str,
