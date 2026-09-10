@@ -202,13 +202,21 @@ fn main() -> Result<()> {
     let mut refresh_view_context = None;
     let mut terminal = None;
 
-    let ret = loop {
+    // Every failure inside the loop has to leave through `break`, since a refresh runs it again
+    // with the terminal already initialized and `?` would skip `ratatui::restore()`.
+    let ret: Result<()> = loop {
         let repository =
-            git::Repository::load(Path::new("."), order, max_count, mailmap, &revspec)?;
+            match git::Repository::load(Path::new("."), order, max_count, mailmap, &revspec) {
+                Ok(repository) => repository,
+                Err(e) => break Err(e),
+            };
 
         let graph = graph::calc_graph(&repository);
 
-        let graph_display = check::decide_graph_display(&graph, graph_width)?;
+        let graph_display = match check::decide_graph_display(&graph, graph_width) {
+            Ok(graph_display) => graph_display,
+            Err(e) => break Err(e),
+        };
 
         let graph_image_manager = GraphImageManager::new(
             &graph,
@@ -244,11 +252,11 @@ fn main() -> Result<()> {
                 continue;
             }
             Err(e) => {
-                break Err(e);
+                break Err(e.into());
             }
         }
     };
 
     ratatui::restore();
-    ret.map_err(Into::into)
+    ret
 }
