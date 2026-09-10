@@ -24,6 +24,10 @@ mod mailmap_tests;
 #[path = "tests/git.rs"]
 mod test_git;
 
+#[cfg(test)]
+#[path = "tests/revspec.rs"]
+mod revspec_tests;
+
 use std::{path::Path, rc::Rc};
 
 use app::{App, Ret};
@@ -58,6 +62,25 @@ struct Args {
     /// Initial selection of commit [default: latest]
     #[arg(short, long, value_name = "TYPE")]
     initial_selection: Option<InitialSelection>,
+
+    /// Revisions to render, passed to `git log` as-is [default: all branches, remotes and tags]
+    #[arg(value_name = "REVSPEC", num_args = 0..)]
+    revspec: Vec<String>,
+}
+
+/// `HEAD` is spelled in upper case in git, and only resolves in lower case on case-insensitive
+/// file systems, so accept `head` everywhere rather than only on some machines.
+fn normalize_revspec(revspec: Vec<String>) -> Vec<String> {
+    revspec
+        .into_iter()
+        .map(|rev| {
+            if rev.eq_ignore_ascii_case("head") {
+                "HEAD".into()
+            } else {
+                rev
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
@@ -162,6 +185,7 @@ fn main() -> Result<()> {
         .or(core_config.option.initial_selection)
         .into();
     let mailmap = core_config.git.mailmap;
+    let revspec = normalize_revspec(args.revspec);
 
     let graph_color_set = color::GraphColorSet::new(&graph_config.color);
 
@@ -171,6 +195,7 @@ fn main() -> Result<()> {
         ui_config,
         color_theme,
         image_protocol,
+        revspec_label: (!revspec.is_empty()).then(|| revspec.join(" ")),
     });
 
     let ec = event::EventController::init();
@@ -178,7 +203,8 @@ fn main() -> Result<()> {
     let mut terminal = None;
 
     let ret = loop {
-        let repository = git::Repository::load(Path::new("."), order, max_count, mailmap)?;
+        let repository =
+            git::Repository::load(Path::new("."), order, max_count, mailmap, &revspec)?;
 
         let graph = graph::calc_graph(&repository);
 

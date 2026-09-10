@@ -1,5 +1,40 @@
 # Command Line Options
 
+## \<REVSPEC\>...
+
+Revisions to render.
+
+If not specified, all commits reachable from branches, remote branches, tags and stashes are
+rendered, which is the default behaviour.
+
+The arguments are passed to `git log` as they are, so anything it accepts works:
+
+```
+$ serie main              # only the commits reachable from main
+$ serie main my-feature   # the commits reachable from either branch
+$ serie head              # the commits reachable from HEAD
+$ serie main..my-feature  # only what my-feature adds on top of main
+$ serie main -- README.md # only the commits that touch README.md
+```
+
+`head` is accepted in any case and is passed to git as `HEAD`, since a lower case `head` resolves
+only on case-insensitive file systems.
+
+Options of `git log` itself need to be separated with `--`, because `serie` parses its own options
+first:
+
+```
+$ serie -- --first-parent main
+```
+
+When a revspec is given:
+
+- Stashes are not rendered, and refs that point outside the rendered commits are not listed.
+- The revspec is shown in the status line, so that a scoped view is not mistaken for the whole
+  repository.
+- A merge commit whose second parent is not rendered (which ranges such as `main..my-feature` can
+  produce) is drawn without its second edge.
+
 ## -n, --max-count \<NUMBER\>
 
 Maximum number of commits to render.

@@ -73,6 +73,9 @@ pub struct AppContext {
     pub ui_config: UiConfig,
     pub color_theme: ColorTheme,
     pub image_protocol: ImageProtocol,
+    /// The revspec the log was scoped to, shown in the status line so that a filtered view is
+    /// not mistaken for the whole repository. `None` when every ref is rendered.
+    pub revspec_label: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -374,11 +377,13 @@ impl App<'_> {
     fn render_status_line(&self, f: &mut Frame, area: Rect) {
         let text: Line = match &self.app_status.status_line {
             StatusLine::None => {
-                if self.app_status.numeric_prefix.is_empty() {
-                    Line::raw("")
-                } else {
+                if !self.app_status.numeric_prefix.is_empty() {
                     Line::raw(self.app_status.numeric_prefix.as_str())
                         .fg(self.ctx.color_theme.status_input_transient_fg)
+                } else if let Some(revspec) = &self.ctx.revspec_label {
+                    Line::raw(revspec.as_str()).fg(self.ctx.color_theme.status_input_transient_fg)
+                } else {
+                    Line::raw("")
                 }
             }
             StatusLine::Input {

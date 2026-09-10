@@ -61,12 +61,24 @@ $ cd <your git repository>
 $ serie
 ```
 
+By default every branch, remote branch, tag and stash is rendered. Pass one or more revisions to
+render only the commits reachable from them.
+
+```
+$ serie main            # only main
+$ serie main my-feature # both branches
+$ serie head            # the current HEAD
+```
+
 ### Options
 
 ```
 Serie - A rich git commit graph in your terminal, like magic 📚
 
-Usage: serie [OPTIONS]
+Usage: serie [OPTIONS] [REVSPEC]...
+
+Arguments:
+  [REVSPEC]...  Revisions to render, passed to `git log` as-is [default: all branches, remotes and tags]
 
 Options:
   -n, --max-count <NUMBER>        Maximum number of commits to render

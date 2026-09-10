@@ -1,6 +1,6 @@
 use std::{
     hash::Hash,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -117,20 +117,29 @@ pub struct Repository {
 }
 
 impl Repository {
+    /// Loads the commits reachable from `revspec`, or from every branch, remote branch, tag and
+    /// stash when `revspec` is empty.
     pub fn load(
         path: &Path,
         sort: SortCommit,
         max_count: Option<usize>,
         mailmap: bool,
+        revspec: &[String],
     ) -> Result<Self> {
         check_git_repository(path)?;
 
         let (mut ref_map, head) = load_refs(path);
 
-        let stashes = load_all_stashes(path, mailmap);
-        let commits = load_all_commits(path, sort, &head, &stashes, max_count, mailmap);
+        // Stashes are reachable only through their own refs, so a scoped log would otherwise
+        // include them or not depending on where each stash happens to be based.
+        let stashes = if revspec.is_empty() {
+            load_all_stashes(path, mailmap)
+        } else {
+            Vec::new()
+        };
+        let commits = load_all_commits(path, sort, &head, &stashes, max_count, mailmap, revspec)?;
         if commits.is_empty() {
-            return Err("no commits in the repository".into());
+            return Err(no_commits_error(revspec));
         }
 
         let commits = merge_stashes_to_commits(commits, stashes);
@@ -139,8 +148,14 @@ impl Repository {
         let (parents_map, children_map) = build_commits_maps(&commits);
         let commit_map = to_commit_map(commits);
 
-        let stash_ref_map = load_stashes_as_refs(path);
-        merge_ref_maps(&mut ref_map, stash_ref_map);
+        if revspec.is_empty() {
+            let stash_ref_map = load_stashes_as_refs(path);
+            merge_ref_maps(&mut ref_map, stash_ref_map);
+        } else {
+            // `git show-ref` ignores the revspec, so drop the refs that point outside of it to
+            // keep the ref list and ref jumps consistent with what is rendered.
+            ref_map.retain(|hash, _| commit_map.contains_key(hash));
+        }
 
         Ok(Self::new(
             path.to_path_buf(),
@@ -259,7 +274,8 @@ fn load_all_commits(
     stashes: &[Commit],
     max_count: Option<usize>,
     mailmap: bool,
-) -> Vec<Commit> {
+    revspec: &[String],
+) -> Result<Vec<Commit>> {
     let mut cmd = Command::new("git");
     cmd.arg("log");
 
@@ -271,23 +287,30 @@ fn load_all_commits(
     .arg("--date=iso-strict")
     .arg("-z"); // use NUL as a delimiter
 
-    // exclude stashes and other refs
-    cmd.arg("--branches").arg("--remotes").arg("--tags");
+    if revspec.is_empty() {
+        // exclude stashes and other refs
+        cmd.arg("--branches").arg("--remotes").arg("--tags");
 
-    // commits that are reachable from the stashes
-    stashes.iter().for_each(|stash| {
-        cmd.arg(stash.parent_commit_hashes[0].as_str());
-    });
+        // commits that are reachable from the stashes
+        stashes.iter().for_each(|stash| {
+            cmd.arg(stash.parent_commit_hashes[0].as_str());
+        });
 
-    if !matches!(head, Head::None) {
-        cmd.arg("HEAD");
+        if !matches!(head, Head::None) {
+            cmd.arg("HEAD");
+        }
+    } else {
+        // passed through to git as-is, so any revision, range or pathspec works
+        cmd.args(revspec);
     }
 
     if let Some(n) = max_count {
         cmd.arg("--max-count").arg(n.to_string());
     }
 
-    cmd.current_dir(path).stdout(Stdio::piped());
+    cmd.current_dir(path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     let mut process = cmd.spawn().unwrap();
 
@@ -322,9 +345,30 @@ fn load_all_commits(
         commits.push(commit);
     }
 
-    process.wait().unwrap();
+    let status = process.wait().unwrap();
+    if !status.success() {
+        // git has already told the user exactly what is wrong with their revspec
+        let mut stderr = String::new();
+        if let Some(mut pipe) = process.stderr.take() {
+            pipe.read_to_string(&mut stderr).ok();
+        }
+        let stderr = stderr.trim();
+        return Err(if stderr.is_empty() {
+            format!("git log failed with {status}").into()
+        } else {
+            Box::<dyn std::error::Error>::from(stderr.to_string())
+        });
+    }
 
-    commits
+    Ok(commits)
+}
+
+fn no_commits_error(revspec: &[String]) -> Box<dyn std::error::Error> {
+    if revspec.is_empty() {
+        "no commits in the repository".into()
+    } else {
+        format!("no commits match {}", revspec.join(" ")).into()
+    }
 }
 
 fn load_all_stashes(path: &Path, mailmap: bool) -> Vec<Commit> {
