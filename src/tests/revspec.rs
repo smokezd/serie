@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use clap::Parser;
+use rstest::rstest;
 
 use crate::{
     git::{self, Ref, Repository},
@@ -202,19 +203,30 @@ fn empty_revspec_range_reports_no_match() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn lowercase_head_is_normalized() {
-    let revspec = vec![
-        "head".to_string(),
-        "Head".to_string(),
-        "master".to_string(),
-        "heads/master".to_string(),
-    ];
-
-    assert_eq!(
-        normalize_revspec(revspec),
-        ["HEAD", "HEAD", "master", "heads/master"]
-    );
+#[rstest]
+#[case("head", "HEAD")]
+#[case("Head", "HEAD")]
+#[case("HEAD", "HEAD")]
+#[case("head~2", "HEAD~2")]
+#[case("head^", "HEAD^")]
+#[case("head^2", "HEAD^2")]
+#[case("head@{1}", "HEAD@{1}")]
+#[case("head:README.md", "HEAD:README.md")]
+#[case("^head", "^HEAD")]
+#[case("^head~1", "^HEAD~1")]
+#[case("head..master", "HEAD..master")]
+#[case("master..head", "master..HEAD")]
+#[case("master...head", "master...HEAD")]
+#[case("head~2..head", "HEAD~2..HEAD")]
+#[case("..head", "..HEAD")]
+#[case("master", "master")]
+#[case("heads/master", "heads/master")]
+#[case("header", "header")]
+#[case("refs/heads/head", "refs/heads/head")]
+#[case("v1.0.0", "v1.0.0")]
+#[case("--first-parent", "--first-parent")]
+fn lowercase_head_is_normalized(#[case] revspec: &str, #[case] expected: &str) {
+    assert_eq!(normalize_revspec(vec![revspec.to_string()]), [expected]);
 }
 
 #[test]

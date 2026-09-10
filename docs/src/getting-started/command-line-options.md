@@ -18,7 +18,8 @@ $ serie main -- README.md # only the commits that touch README.md
 ```
 
 `head` is accepted in any case and is passed to git as `HEAD`, since a lower case `head` resolves
-only on case-insensitive file systems.
+only on case-insensitive file systems. It is rewritten wherever it names a revision, so `head~2`,
+`^head` and `head~3..head` all work as well.
 
 Options of `git log` itself need to be separated with `--`, because `serie` parses its own options
 first:

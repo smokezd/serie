@@ -71,16 +71,57 @@ struct Args {
 /// `HEAD` is spelled in upper case in git, and only resolves in lower case on case-insensitive
 /// file systems, so accept `head` everywhere rather than only on some machines.
 fn normalize_revspec(revspec: Vec<String>) -> Vec<String> {
-    revspec
-        .into_iter()
-        .map(|rev| {
-            if rev.eq_ignore_ascii_case("head") {
-                "HEAD".into()
-            } else {
-                rev
+    revspec.iter().map(|rev| normalize_rev(rev)).collect()
+}
+
+/// Rewrites `head` wherever it names a revision, including both ends of a range and revisions
+/// carrying `~`, `^`, `@` or `:` suffixes: `head~2`, `^head`, `head..main`.
+fn normalize_rev(rev: &str) -> String {
+    if rev.starts_with('-') {
+        // an option for git itself, which never names a revision
+        return rev.to_string();
+    }
+
+    let mut normalized = String::with_capacity(rev.len());
+    let mut rest = rev;
+    loop {
+        let (revision, range_operator, remainder) = match rest.find("..") {
+            Some(i) => {
+                let operator_len = if rest[i..].starts_with("...") { 3 } else { 2 };
+                (
+                    &rest[..i],
+                    &rest[i..i + operator_len],
+                    &rest[i + operator_len..],
+                )
             }
-        })
-        .collect()
+            None => (rest, "", ""),
+        };
+
+        normalized.push_str(&normalize_revision(revision));
+        normalized.push_str(range_operator);
+
+        if range_operator.is_empty() {
+            break;
+        }
+        rest = remainder;
+    }
+    normalized
+}
+
+fn normalize_revision(revision: &str) -> String {
+    // `^` means exclusion in front of a revision and a parent reference behind it
+    let (exclusion, rest) = match revision.strip_prefix('^') {
+        Some(rest) => ("^", rest),
+        None => ("", revision),
+    };
+    let name_len = rest.find(['~', '^', '@', ':']).unwrap_or(rest.len());
+    let (name, suffix) = rest.split_at(name_len);
+
+    if name.eq_ignore_ascii_case("head") {
+        format!("{exclusion}HEAD{suffix}")
+    } else {
+        revision.to_string()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
