@@ -442,7 +442,7 @@
         "list_marker_base_fg": {
           "type": "string",
           "description": "Color for the marker on the merge base commit, shown when exactly two revisions are given.",
-          "default": "blue"
+          "default": "white"
         },
         "list_subject_fg": {
           "type": "string",

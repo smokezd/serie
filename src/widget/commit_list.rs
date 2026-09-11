@@ -868,7 +868,7 @@ impl CommitList<'_> {
             .rendering_commit_info_iter(state)
             .map(|(_, commit_info)| {
                 if commit_info.is_merge_base {
-                    ListItem::new("◆".fg(self.ctx.color_theme.list_marker_base_fg))
+                    ListItem::new("◆".fg(self.ctx.color_theme.list_marker_base_fg).bold())
                 } else {
                     ListItem::new("│".fg(commit_info.graph_color))
                 }

@@ -29,7 +29,10 @@ pub struct ColorTheme {
     pub list_ref_stash_fg: RatatuiColor,
     #[default(RatatuiColor::Cyan)]
     pub list_head_fg: RatatuiColor,
-    #[default(RatatuiColor::Blue)]
+    // Bright white deliberately: every default graph lane colour is a mid-saturation pastel
+    // (#E06C76 #98C379 #E5C07B #61AFEF #C678DD #56B6C2) and the marker sits right beside them,
+    // so a neutral is the only hue that cannot collide with a lane.
+    #[default(RatatuiColor::White)]
     pub list_marker_base_fg: RatatuiColor,
     #[default(RatatuiColor::Reset)]
     pub list_subject_fg: RatatuiColor,
