@@ -396,3 +396,44 @@ fn join_span_groups_with_space(span_groups: Vec<Vec<Span<'static>>>) -> Line<'st
     }
     Line::from(spans)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn help_text(keybind: &KeyBind) -> Vec<String> {
+        let (key_lines, value_lines) =
+            build_lines(&ColorTheme::default(), keybind, &CoreConfig::default());
+        key_lines
+            .iter()
+            .zip(value_lines.iter())
+            .map(|(k, v)| format!("{}  {}", line_text(k), line_text(v)))
+            .collect()
+    }
+
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn test_help_lists_graph_toggle_with_its_key() {
+        let keybind = KeyBind::new(None);
+        let rows = help_text(&keybind);
+        let row = rows
+            .iter()
+            .find(|r| r.contains("Toggle commit graph"))
+            .expect("help should list the graph toggle");
+        assert!(row.contains("<T>"), "unexpected key column: {row}");
+    }
+
+    #[test]
+    fn test_help_follows_a_custom_graph_toggle_key() {
+        let patch: KeyBind = toml::from_str(r#"graph_toggle = ["ctrl-o"]"#).unwrap();
+        let rows = help_text(&KeyBind::new(Some(patch)));
+        let row = rows
+            .iter()
+            .find(|r| r.contains("Toggle commit graph"))
+            .expect("help should list the graph toggle");
+        assert!(row.contains("<Ctrl-o>"), "unexpected key column: {row}");
+    }
+}
