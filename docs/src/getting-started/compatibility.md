@@ -34,6 +34,9 @@ Rendering using Unicode Placeholder is available by explicitly specifying `kitty
 
 - tmux is supported only when using the kitty Unicode placeholder protocol.
   - Requires `set -g allow-passthrough on` in tmux.conf (version 3.2+).
+- herdr panes are detected through the `HERDR_ENV` environment variable and use the kitty
+  Unicode placeholder protocol, which is the only mode herdr paints. A herdr pane reports the
+  host terminal's own `TERM`, so it cannot be told apart from a bare terminal any other way.
 
 ### Unsupported environments
 

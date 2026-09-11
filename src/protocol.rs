@@ -9,6 +9,14 @@ use ratatui::style::{Color, Style};
 // By default assume the Iterm2 is the best protocol to use for all terminals *unless* an env
 // variable is set that suggests the terminal is probably Kitty.
 pub fn auto_detect() -> ImageProtocol {
+    // A herdr pane reports the host terminal's own `TERM`, so nothing below can tell it apart
+    // from a bare terminal, and the iterm2 fallback draws nothing there. herdr paints images
+    // only from virtual placements, which is the Unicode placeholder mode.
+    if detect_herdr() {
+        return ImageProtocol::KittyUnicode {
+            tmux: detect_tmux(),
+        };
+    }
     if detect_kitty_graphics_protocol() {
         if detect_tmux() {
             ImageProtocol::KittyUnicode { tmux: true }
@@ -18,6 +26,10 @@ pub fn auto_detect() -> ImageProtocol {
     } else {
         ImageProtocol::Iterm2
     }
+}
+
+fn detect_herdr() -> bool {
+    env::var("HERDR_ENV").is_ok_and(|v| !v.is_empty())
 }
 
 fn detect_kitty_graphics_protocol() -> bool {
