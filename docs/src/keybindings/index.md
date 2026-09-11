@@ -33,6 +33,7 @@ The default key bindings can be overridden.
 | <kbd>Ctrl-t</kbd>                    | Toggle search target                               | `search_target_toggle`                       |
 | <kbd>Ctrl-g</kbd>                    | Toggle ignore case                                 | `ignore_case_toggle`                         |
 | <kbd>Ctrl-x</kbd>                    | Toggle fuzzy match                                 | `fuzzy_toggle`                               |
+| <kbd>T</kbd>                         | Toggle commit graph                                | `graph_toggle`                               |
 | <kbd>R</kbd>                         | Refresh                                            | `refresh`                                    |
 | <kbd>c/C</kbd>                       | Copy commit short/full hash                        | `short_copy` `full_copy`                     |
 | <kbd>d</kbd>                         | Toggle custom user command view                    | `user_command_1`                             |

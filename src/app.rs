@@ -14,6 +14,7 @@ use ratatui::{
 use rustc_hash::FxHashMap;
 
 use crate::{
+    check::GraphDisplay,
     color::{ColorTheme, GraphColorSet},
     config::{CoreConfig, CursorType, UiConfig, UserCommand, UserCommandType},
     event::{AppEvent, EventController, UserEvent, UserEventWithCount},
@@ -96,7 +97,7 @@ impl<'a> App<'a> {
         graph_image_manager: GraphImageManager<'a>,
         graph: &'a Graph,
         graph_color_set: &'a GraphColorSet,
-        cell_width_type: CellWidthType,
+        graph_display: GraphDisplay,
         initial_selection: InitialSelection,
         ctx: Rc<AppContext>,
         ec: &'a EventController,
@@ -117,7 +118,7 @@ impl<'a> App<'a> {
                 CommitInfo::new(commit, refs, graph_color)
             })
             .collect();
-        let graph_cell_width = match cell_width_type {
+        let graph_cell_width = match graph_display.cell_width_type {
             CellWidthType::Double => (graph.max_pos_x + 1) as u16 * 2,
             CellWidthType::Single => (graph.max_pos_x + 1) as u16,
         };
@@ -126,6 +127,8 @@ impl<'a> App<'a> {
             commits,
             graph_image_manager,
             graph_cell_width,
+            graph_display.visible,
+            graph_display.toggleable,
             head,
             ref_name_to_commit_index_map,
             SearchOptions {
@@ -267,6 +270,10 @@ impl App<'_> {
                 AppEvent::CloseHelp => {
                     terminal.clear()?;
                     self.close_help();
+                }
+                AppEvent::ClearGraphImages => {
+                    self.clear_image(None)?;
+                    terminal.clear()?;
                 }
                 AppEvent::SelectOlderCommit => {
                     self.select_older_commit();

@@ -147,6 +147,11 @@ The character width that a graph image unit cell occupies.
   - `auto`
   - `double`
   - `single`
+  - `hidden`
+
+`hidden` starts without the graph column, leaving its width to the other columns. Useful in a terminal that cannot display images at all, where the column would otherwise stay blank. It is also the only value that never fails on a narrow terminal.
+
+The graph can be shown and hidden again at any time with the [`graph_toggle`](../keybindings/index.md) keybinding, whichever value is set here.
 
 The value specified in the command line argument takes precedence.
 

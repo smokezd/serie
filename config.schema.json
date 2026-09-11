@@ -34,11 +34,12 @@
             },
             "graph_width": {
               "type": "string",
-              "description": "The character width that a graph image unit cell occupies. The value specified in the command line argument takes precedence.",
+              "description": "The character width that a graph image unit cell occupies, or 'hidden' to start without the graph column. The value specified in the command line argument takes precedence.",
               "enum": [
                 "auto",
                 "double",
-                "single"
+                "single",
+                "hidden"
               ],
               "default": "auto"
             },
@@ -680,6 +681,9 @@
           "$ref": "#/definitions/keybindArray"
         },
         "fuzzy_toggle": {
+          "$ref": "#/definitions/keybindArray"
+        },
+        "graph_toggle": {
           "$ref": "#/definitions/keybindArray"
         },
         "short_copy": {

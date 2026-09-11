@@ -4,10 +4,11 @@ use ratatui::{crossterm::event::KeyEvent, layout::Rect, Frame};
 
 use crate::{
     app::AppContext,
+    config::UserListColumnType,
     event::{AppEvent, Sender, UserEvent, UserEventWithCount},
     git::CommitHash,
     view::{ListRefreshViewContext, RefreshViewContext},
-    widget::commit_list::{CommitList, CommitListState, SearchState},
+    widget::commit_list::{CommitList, CommitListState, GraphToggleResult, SearchState},
 };
 
 #[derive(Debug)]
@@ -149,6 +150,9 @@ impl<'a> ListView<'a> {
                     self.as_mut_list_state().toggle_fuzzy();
                     self.update_search_options_message();
                 }
+                UserEvent::GraphToggle => {
+                    self.toggle_graph();
+                }
                 UserEvent::UserCommand(n) => {
                     self.tx.send(AppEvent::OpenUserCommand(n));
                 }
@@ -223,6 +227,36 @@ impl<'a> ListView<'a> {
         self.as_list_state().graph_image_ids_sorted()
     }
 
+    fn toggle_graph(&mut self) {
+        if !self
+            .ctx
+            .ui_config
+            .list
+            .columns
+            .contains(&UserListColumnType::Graph)
+        {
+            // Hiding a column that was never laid out would look like a dead key, so say so
+            // instead of silently doing nothing.
+            self.tx.send(AppEvent::UpdateStatusTransient(
+                "Graph column is not enabled".into(),
+            ));
+            return;
+        }
+        match self.as_mut_list_state().toggle_graph() {
+            // Showing or hiding the graph is visible on screen, so it needs no announcement.
+            GraphToggleResult::Shown => {}
+            GraphToggleResult::Hidden => {
+                // Images already placed for the graph outlive the column that held them.
+                self.tx.send(AppEvent::ClearGraphImages);
+            }
+            GraphToggleResult::TerminalTooSmall => {
+                self.tx.send(AppEvent::NotifyError(
+                    "Terminal too small to show the commit graph".into(),
+                ));
+            }
+        }
+    }
+
     fn update_search_status(&self) {
         if let SearchState::Searching { .. } = self.as_list_state().search_state() {
             let list_state = self.as_list_state();
@@ -295,9 +329,11 @@ impl<'a> ListView<'a> {
             scroll_to_top,
             search_options,
             search_context,
+            graph_visible,
         } = list_context;
         let list_state = self.as_mut_list_state();
         list_state.restore_search_options(*search_options);
+        list_state.restore_graph_visible(*graph_visible);
         list_state.reset_height(*height);
         if *scroll_to_top {
             list_state.select_first();

@@ -33,9 +33,13 @@ _Possible values:_ `chrono`, `topo`
 
 The character width that a graph image unit cell occupies.
 
-_Possible values:_ `auto`, `double`, `single`
+_Possible values:_ `auto`, `double`, `single`, `hidden`
 
 If not specified or `auto` is specified, `double` will be used automatically if there is enough width to display it, `single` otherwise.
+
+`hidden` will start without the graph column, leaving its width to the other columns. This is useful in a terminal that cannot display images at all, where the graph column would otherwise be reserved and stay blank. Unlike the other values, `hidden` never fails on a narrow terminal.
+
+The graph can be shown and hidden again at any time with the `graph_toggle` keybinding (<kbd>T</kbd> by default), whichever value is used here.
 
 <img src="https://raw.githubusercontent.com/lusingander/serie/master/img/graph-width-double.png" width=300>
 

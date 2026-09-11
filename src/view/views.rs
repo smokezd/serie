@@ -196,6 +196,7 @@ pub struct ListRefreshViewContext {
     pub scroll_to_top: bool,
     pub search_options: SearchOptions,
     pub search_context: Option<SearchRefreshContext>,
+    pub graph_visible: bool,
 }
 
 impl From<&CommitListState<'_>> for ListRefreshViewContext {
@@ -207,6 +208,7 @@ impl From<&CommitListState<'_>> for ListRefreshViewContext {
         let scroll_to_top = selected == 0 && offset == 0;
         let search_options = list_state.search_options();
         let search_context = list_state.search_refresh_context();
+        let graph_visible = list_state.graph_visible();
         ListRefreshViewContext {
             commit_hash,
             selected,
@@ -214,6 +216,7 @@ impl From<&CommitListState<'_>> for ListRefreshViewContext {
             scroll_to_top,
             search_options,
             search_context,
+            graph_visible,
         }
     }
 }

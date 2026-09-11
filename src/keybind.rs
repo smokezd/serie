@@ -257,6 +257,7 @@ mod tests {
             navigate_left = ["ctrl-h", "shift-h", "alt-h"]
             navigate_right = ["ctrl-shift-l", "alt-shift-ctrl-l"]
             quit = ["esc", "f12"]
+            graph_toggle = ["shift-t"]
             user_command_1 = ["d"]
             user_command_view_toggle_10 = ["e"]
         "#;
@@ -302,6 +303,10 @@ mod tests {
                 (
                     KeyEvent::new(KeyCode::F(12), KeyModifiers::empty()),
                     UserEvent::Quit,
+                ),
+                (
+                    KeyEvent::new(KeyCode::Char('T'), KeyModifiers::SHIFT),
+                    UserEvent::GraphToggle,
                 ),
                 (
                     KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty()),

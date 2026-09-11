@@ -183,12 +183,22 @@ impl SearchMatcher {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphToggleResult {
+    Shown,
+    Hidden,
+    /// The graph is hidden and the terminal is too narrow to show it.
+    TerminalTooSmall,
+}
+
 #[derive(Debug)]
 pub struct CommitListState<'a> {
     commits: Vec<CommitInfo<'a>>,
     commit_hash_set: FxHashSet<&'a CommitHash>,
     graph_image_manager: GraphImageManager<'a>,
     graph_cell_width: u16,
+    graph_visible: bool,
+    graph_toggleable: bool,
     head: &'a Head,
 
     ref_name_to_commit_index_map: FxHashMap<&'a str, usize>,
@@ -209,6 +219,8 @@ impl<'a> CommitListState<'a> {
         commits: Vec<CommitInfo<'a>>,
         graph_image_manager: GraphImageManager<'a>,
         graph_cell_width: u16,
+        graph_visible: bool,
+        graph_toggleable: bool,
         head: &'a Head,
         ref_name_to_commit_index_map: FxHashMap<&'a str, usize>,
         search_options: SearchOptions,
@@ -220,6 +232,8 @@ impl<'a> CommitListState<'a> {
             commit_hash_set,
             graph_image_manager,
             graph_cell_width,
+            graph_visible,
+            graph_toggleable,
             head,
             ref_name_to_commit_index_map,
             search_state: SearchState::Inactive,
@@ -234,11 +248,43 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn graph_area_cell_width(&self) -> u16 {
+        if !self.graph_visible {
+            return 0; // the column collapses entirely, padding included
+        }
         self.graph_cell_width + 1 // right pad
+    }
+
+    pub fn graph_visible(&self) -> bool {
+        self.graph_visible
+    }
+
+    pub fn restore_graph_visible(&mut self, visible: bool) {
+        // A terminal too narrow for the graph leaves it permanently hidden, so a restored `true`
+        // from before a refresh must not override that.
+        self.graph_visible = visible && self.graph_toggleable;
+    }
+
+    pub fn toggle_graph(&mut self) -> GraphToggleResult {
+        if !self.graph_visible && !self.graph_toggleable {
+            return GraphToggleResult::TerminalTooSmall;
+        }
+        self.graph_visible = !self.graph_visible;
+        if self.graph_visible {
+            GraphToggleResult::Shown
+        } else {
+            GraphToggleResult::Hidden
+        }
     }
 
     pub fn update_height(&mut self, height: usize) {
         self.height = height;
+
+        if self.height == 0 {
+            // No row fits, so there is nothing to clamp the selection against, and the clamping
+            // below would underflow. The selection is re-clamped once the area has rows again.
+            // Reachable whenever the terminal is shorter than the status line plus one row.
+            return;
+        }
 
         if self.total > self.height && self.total - self.height < self.offset {
             let diff = self.offset - (self.total - self.height);
@@ -253,6 +299,9 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn ensure_visible_graph_uploaded(&mut self) {
+        if !self.graph_visible {
+            return; // nothing is drawn, so nothing needs to reach the terminal
+        }
         self.commits
             .iter()
             .skip(self.offset)
@@ -1175,6 +1224,16 @@ mod tests {
         subjects: &[&str],
         f: impl FnOnce(&mut CommitListState<'_>) -> R,
     ) -> R {
+        with_graph_commit_list_state(subjects, 0, true, true, f)
+    }
+
+    fn with_graph_commit_list_state<R>(
+        subjects: &[&str],
+        graph_cell_width: u16,
+        graph_visible: bool,
+        graph_toggleable: bool,
+        f: impl FnOnce(&mut CommitListState<'_>) -> R,
+    ) -> R {
         let commits: Vec<Commit> = subjects
             .iter()
             .enumerate()
@@ -1218,7 +1277,9 @@ mod tests {
         let mut state = CommitListState::new(
             commit_infos,
             graph_image_manager,
-            0,
+            graph_cell_width,
+            graph_visible,
+            graph_toggleable,
             repository.head(),
             FxHashMap::default(),
             SearchOptions::default(),
@@ -1570,6 +1631,169 @@ mod tests {
             Constraint::Length(17), // Date (15 + 2 pad)
         ];
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_zero_height_area_keeps_the_selection_intact() {
+        // A terminal shorter than the status line leaves the list no rows at all. `-g hidden`
+        // reaches this, since it is the one width that does not refuse to start on a tiny
+        // terminal.
+        with_commit_list_state(&["a", "b", "c"], |state| {
+            state.select_next();
+            let before = state.current_list_status();
+
+            state.update_height(0);
+            assert_eq!(state.current_list_status(), (before.0, before.1, 0));
+
+            state.update_height(3);
+            assert_eq!(state.current_list_status(), before);
+        });
+    }
+
+    #[test]
+    fn test_hidden_graph_reports_no_area_and_toggles_back() {
+        with_graph_commit_list_state(&["a", "b"], 6, false, true, |state| {
+            assert_eq!(state.graph_area_cell_width(), 0);
+            assert!(!state.graph_visible());
+
+            assert_eq!(state.toggle_graph(), GraphToggleResult::Shown);
+            assert!(state.graph_visible());
+            assert_eq!(state.graph_area_cell_width(), 7); // 6 + right pad
+
+            assert_eq!(state.toggle_graph(), GraphToggleResult::Hidden);
+            assert!(!state.graph_visible());
+            assert_eq!(state.graph_area_cell_width(), 0);
+        });
+    }
+
+    #[test]
+    fn test_graph_toggle_is_refused_when_the_terminal_is_too_small() {
+        with_graph_commit_list_state(&["a", "b"], 6, false, false, |state| {
+            assert_eq!(state.toggle_graph(), GraphToggleResult::TerminalTooSmall);
+            assert!(!state.graph_visible());
+            assert_eq!(state.graph_area_cell_width(), 0);
+        });
+    }
+
+    #[test]
+    fn test_restore_graph_visible_cannot_reveal_an_untoggleable_graph() {
+        with_graph_commit_list_state(&["a", "b"], 6, false, false, |state| {
+            state.restore_graph_visible(true);
+            assert!(!state.graph_visible());
+        });
+        with_graph_commit_list_state(&["a", "b"], 6, false, true, |state| {
+            state.restore_graph_visible(true);
+            assert!(state.graph_visible());
+        });
+    }
+
+    #[test]
+    fn test_hidden_graph_builds_no_images() {
+        // Image ids appear only once a row image has actually been built, so an empty set proves
+        // the hidden graph costs nothing. (Pending uploads would not: the iTerm2 protocol used
+        // here inlines its images instead of uploading them.)
+        with_graph_commit_list_state(&["a", "b"], 6, false, true, |state| {
+            state.ensure_visible_graph_uploaded();
+            assert!(state.graph_image_ids_sorted().is_empty());
+
+            state.toggle_graph();
+            state.ensure_visible_graph_uploaded();
+            assert_eq!(state.graph_image_ids_sorted().len(), 2);
+        });
+    }
+
+    #[test]
+    fn test_calc_cell_width_hidden_graph_collapses_its_column() {
+        let area_width = 80;
+        let subject_min_width = 20;
+        let graph_width = 0; // what `graph_area_cell_width` reports while the graph is hidden
+        let name_width = 10;
+        let date_width = 15;
+        let columns = vec![
+            UserListColumnType::Graph,
+            UserListColumnType::Marker,
+            UserListColumnType::Subject,
+            UserListColumnType::Name,
+            UserListColumnType::Hash,
+            UserListColumnType::Date,
+        ];
+
+        let actual = calc_cell_widths(
+            area_width,
+            subject_min_width,
+            graph_width,
+            name_width,
+            date_width,
+            &columns,
+        );
+
+        let expected = vec![
+            Constraint::Length(0),  // Graph
+            Constraint::Length(1),  // Marker
+            Constraint::Min(0),     // Subject
+            Constraint::Length(12), // Name (10 + 2 pad)
+            Constraint::Length(9),  // Hash (7 + 2 pad)
+            Constraint::Length(17), // Date (15 + 2 pad)
+        ];
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_calc_cell_width_hidden_graph_keeps_the_other_columns_on_a_small_area() {
+        // The same area that has to drop Name when the graph takes 6 columns fits every column
+        // once the graph is hidden.
+        let area_width = 60;
+        let subject_min_width = 20;
+        let name_width = 10;
+        let date_width = 15;
+        let columns = vec![
+            UserListColumnType::Graph,
+            UserListColumnType::Marker,
+            UserListColumnType::Subject,
+            UserListColumnType::Name,
+            UserListColumnType::Hash,
+            UserListColumnType::Date,
+        ];
+
+        let visible = calc_cell_widths(
+            area_width,
+            subject_min_width,
+            6,
+            name_width,
+            date_width,
+            &columns,
+        );
+        assert_eq!(
+            visible,
+            vec![
+                Constraint::Length(6),  // Graph
+                Constraint::Length(1),  // Marker
+                Constraint::Min(0),     // Subject
+                Constraint::Length(0),  // Name dropped to make room for the graph
+                Constraint::Length(9),  // Hash
+                Constraint::Length(17), // Date
+            ]
+        );
+
+        let hidden = calc_cell_widths(
+            area_width,
+            subject_min_width,
+            0,
+            name_width,
+            date_width,
+            &columns,
+        );
+        assert_eq!(
+            hidden,
+            vec![
+                Constraint::Length(0),  // Graph
+                Constraint::Length(1),  // Marker
+                Constraint::Min(0),     // Subject
+                Constraint::Length(12), // Name kept
+                Constraint::Length(9),  // Hash
+                Constraint::Length(17), // Date kept
+            ]
+        );
     }
 
     #[test]

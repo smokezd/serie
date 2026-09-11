@@ -106,6 +106,8 @@ enum GraphWidthType {
     Auto,
     Double,
     Single,
+    /// Do not render the graph column at all. `graph_toggle` brings it back at `Auto` width.
+    Hidden,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
@@ -180,12 +182,12 @@ fn main() -> Result<()> {
 
         let graph = graph::calc_graph(&repository);
 
-        let cell_width_type = check::decide_cell_width_type(&graph, graph_width)?;
+        let graph_display = check::decide_graph_display(&graph, graph_width)?;
 
         let graph_image_manager = GraphImageManager::new(
             &graph,
             &graph_color_set,
-            cell_width_type,
+            graph_display.cell_width_type,
             graph_style,
             graph_image_width_mode,
             image_protocol,
@@ -200,7 +202,7 @@ fn main() -> Result<()> {
             graph_image_manager,
             &graph,
             &graph_color_set,
-            cell_width_type,
+            graph_display,
             initial_selection,
             ctx.clone(),
             &ec,
