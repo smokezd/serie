@@ -34,6 +34,7 @@ The default key bindings can be overridden.
 | <kbd>Ctrl-g</kbd>                    | Toggle ignore case                                 | `ignore_case_toggle`                         |
 | <kbd>Ctrl-x</kbd>                    | Toggle fuzzy match                                 | `fuzzy_toggle`                               |
 | <kbd>T</kbd>                         | Toggle commit graph                                | `graph_toggle`                               |
+| <kbd>b</kbd>                         | Go to merge base                                   | `go_to_merge_base`                           |
 | <kbd>R</kbd>                         | Refresh                                            | `refresh`                                    |
 | <kbd>c/C</kbd>                       | Copy commit short/full hash                        | `short_copy` `full_copy`                     |
 | <kbd>d</kbd>                         | Toggle custom user command view                    | `user_command_1`                             |

@@ -8,7 +8,9 @@ use crate::{
     event::{AppEvent, Sender, UserEvent, UserEventWithCount},
     git::CommitHash,
     view::{ListRefreshViewContext, RefreshViewContext},
-    widget::commit_list::{CommitList, CommitListState, GraphToggleResult, SearchState},
+    widget::commit_list::{
+        CommitList, CommitListState, GraphToggleResult, MergeBaseJump, SearchState,
+    },
 };
 
 #[derive(Debug)]
@@ -153,6 +155,9 @@ impl<'a> ListView<'a> {
                 UserEvent::GraphToggle => {
                     self.toggle_graph();
                 }
+                UserEvent::GoToMergeBase => {
+                    self.go_to_merge_base();
+                }
                 UserEvent::UserCommand(n) => {
                     self.tx.send(AppEvent::OpenUserCommand(n));
                 }
@@ -225,6 +230,23 @@ impl<'a> ListView<'a> {
 
     pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
         self.as_list_state().graph_image_ids_sorted()
+    }
+
+    fn go_to_merge_base(&mut self) {
+        match self.as_mut_list_state().select_merge_base() {
+            // Arriving where the key said to go needs no announcement.
+            MergeBaseJump::Selected => {}
+            MergeBaseJump::NotScoped => {
+                self.tx.send(AppEvent::UpdateStatusTransient(
+                    "Merge base needs exactly two revisions".into(),
+                ));
+            }
+            MergeBaseJump::OutsideRenderedCommits => {
+                self.tx.send(AppEvent::NotifyError(
+                    "Merge base is not among the rendered commits".into(),
+                ));
+            }
+        }
     }
 
     fn toggle_graph(&mut self) {

@@ -29,6 +29,8 @@ pub struct ColorTheme {
     pub list_ref_stash_fg: RatatuiColor,
     #[default(RatatuiColor::Cyan)]
     pub list_head_fg: RatatuiColor,
+    #[default(RatatuiColor::Blue)]
+    pub list_marker_base_fg: RatatuiColor,
     #[default(RatatuiColor::Reset)]
     pub list_subject_fg: RatatuiColor,
     #[default(RatatuiColor::Cyan)]

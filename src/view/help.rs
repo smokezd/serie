@@ -255,6 +255,7 @@ fn build_lines(
         (vec![UserEvent::IgnoreCaseToggle], "Toggle ignore case".into()),
         (vec![UserEvent::FuzzyToggle], "Toggle fuzzy match".into()),
         (vec![UserEvent::GraphToggle], "Toggle commit graph".into()),
+        (vec![UserEvent::GoToMergeBase], "Go to merge base".into()),
         (vec![UserEvent::Refresh], "Refresh".into()),
         (vec![UserEvent::ShortCopy], "Copy commit short hash".into()),
         (vec![UserEvent::FullCopy], "Copy commit hash".into()),
@@ -424,6 +425,16 @@ mod tests {
             .find(|r| r.contains("Toggle commit graph"))
             .expect("help should list the graph toggle");
         assert!(row.contains("<T>"), "unexpected key column: {row}");
+    }
+
+    #[test]
+    fn test_help_lists_the_merge_base_jump_with_its_key() {
+        let rows = help_text(&KeyBind::new(None));
+        let row = rows
+            .iter()
+            .find(|r| r.contains("Go to merge base"))
+            .expect("help should list the merge base jump");
+        assert!(row.contains("<b>"), "unexpected key column: {row}");
     }
 
     #[test]

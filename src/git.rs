@@ -114,6 +114,8 @@ pub struct Repository {
     head: Head,
     // to preserve order of the original commits from `git log`, we store the commit hashes
     commit_hashes: Vec<CommitHash>,
+    // `Some` only when the revspec named exactly two revisions; see `two_revisions`
+    merge_base: Option<CommitHash>,
 }
 
 impl Repository {
@@ -157,6 +159,8 @@ impl Repository {
             ref_map.retain(|hash, _| commit_map.contains_key(hash));
         }
 
+        let merge_base = two_revisions(revspec).and_then(|(a, b)| load_merge_base(path, a, b));
+
         Ok(Self::new(
             path.to_path_buf(),
             commit_map,
@@ -165,6 +169,7 @@ impl Repository {
             ref_map,
             head,
             commit_hashes,
+            merge_base,
         ))
     }
 
@@ -176,6 +181,7 @@ impl Repository {
         ref_map: RefMap,
         head: Head,
         commit_hashes: Vec<CommitHash>,
+        merge_base: Option<CommitHash>,
     ) -> Self {
         Self {
             path,
@@ -185,6 +191,7 @@ impl Repository {
             ref_map,
             head,
             commit_hashes,
+            merge_base,
         }
     }
 
@@ -228,6 +235,12 @@ impl Repository {
         &self.head
     }
 
+    /// The common ancestor of the two revisions the revspec named, if it named exactly two.
+    /// The commit is not necessarily rendered: `--max-count` can cut it off.
+    pub fn merge_base(&self) -> Option<&CommitHash> {
+        self.merge_base.as_ref()
+    }
+
     pub fn commit_detail(&self, commit_hash: &CommitHash) -> (Commit, Vec<FileChange>) {
         let commit = self.commit(commit_hash).unwrap().clone();
         let changes = if commit.parent_commit_hashes.is_empty() {
@@ -245,6 +258,36 @@ fn check_git_repository(path: &Path) -> Result<()> {
         return Err(msg.into());
     }
     Ok(())
+}
+
+/// A merge base only means something when the revspec names exactly two commits, so a range, an
+/// exclusion or a `git log` flag opts out. Revision modifiers (`HEAD~2`, `branch@{1}`) are kept,
+/// since each still names a single commit.
+fn two_revisions(revspec: &[String]) -> Option<(&str, &str)> {
+    let [a, b] = revspec else { return None };
+    for rev in [a, b] {
+        if rev.starts_with('-') || rev.starts_with('^') || rev.contains("..") {
+            return None;
+        }
+    }
+    Some((a, b))
+}
+
+fn load_merge_base(path: &Path, a: &str, b: &str) -> Option<CommitHash> {
+    let output = Command::new("git")
+        .arg("merge-base")
+        .arg(a)
+        .arg(b)
+        .current_dir(path)
+        .output()
+        .ok()?;
+    // Unrelated histories exit non-zero, which is not an error worth failing the launch over.
+    if !output.status.success() {
+        return None;
+    }
+    let hash = String::from_utf8(output.stdout).ok()?;
+    let hash = hash.trim();
+    (!hash.is_empty()).then(|| CommitHash::from(hash))
 }
 
 fn is_inside_work_tree(path: &Path) -> bool {
@@ -740,4 +783,41 @@ pub fn get_initial_commit_additions(path: &Path, commit_hash: &CommitHash) -> Ve
     cmd.wait().unwrap();
 
     changes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn revspec(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn test_two_revisions_accepts_a_pair_of_plain_revisions() {
+        assert_eq!(
+            two_revisions(&revspec(&["master", "topic"])),
+            Some(("master", "topic"))
+        );
+        // Revision modifiers still name a single commit each.
+        assert_eq!(
+            two_revisions(&revspec(&["HEAD~2", "origin/master"])),
+            Some(("HEAD~2", "origin/master"))
+        );
+    }
+
+    #[test]
+    fn test_two_revisions_requires_exactly_two() {
+        assert_eq!(two_revisions(&revspec(&[])), None);
+        assert_eq!(two_revisions(&revspec(&["master"])), None);
+        assert_eq!(two_revisions(&revspec(&["a", "b", "c"])), None);
+    }
+
+    #[test]
+    fn test_two_revisions_rejects_ranges_exclusions_and_flags() {
+        assert_eq!(two_revisions(&revspec(&["a..b", "c"])), None);
+        assert_eq!(two_revisions(&revspec(&["a", "b...c"])), None);
+        assert_eq!(two_revisions(&revspec(&["^a", "b"])), None);
+        assert_eq!(two_revisions(&revspec(&["--all", "b"])), None);
+    }
 }

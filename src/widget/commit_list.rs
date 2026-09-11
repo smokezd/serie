@@ -33,14 +33,21 @@ pub struct CommitInfo<'a> {
     commit: &'a Commit,
     refs: Vec<&'a Ref>,
     graph_color: Color,
+    is_merge_base: bool,
 }
 
 impl<'a> CommitInfo<'a> {
-    pub fn new(commit: &'a Commit, refs: Vec<&'a Ref>, graph_color: Color) -> Self {
+    pub fn new(
+        commit: &'a Commit,
+        refs: Vec<&'a Ref>,
+        graph_color: Color,
+        is_merge_base: bool,
+    ) -> Self {
         Self {
             commit,
             refs,
             graph_color,
+            is_merge_base,
         }
     }
 }
@@ -184,6 +191,15 @@ impl SearchMatcher {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeBaseJump {
+    Selected,
+    /// The revspec did not name exactly two revisions, so there is no base to speak of.
+    NotScoped,
+    /// A base exists but was cut from the rendered commits, e.g. by `--max-count`.
+    OutsideRenderedCommits,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphToggleResult {
     Shown,
     Hidden,
@@ -200,6 +216,7 @@ pub struct CommitListState<'a> {
     graph_visible: bool,
     graph_toggleable: bool,
     head: &'a Head,
+    merge_base: Option<&'a CommitHash>,
 
     ref_name_to_commit_index_map: FxHashMap<&'a str, usize>,
 
@@ -222,6 +239,7 @@ impl<'a> CommitListState<'a> {
         graph_visible: bool,
         graph_toggleable: bool,
         head: &'a Head,
+        merge_base: Option<&'a CommitHash>,
         ref_name_to_commit_index_map: FxHashMap<&'a str, usize>,
         search_options: SearchOptions,
     ) -> CommitListState<'a> {
@@ -235,6 +253,7 @@ impl<'a> CommitListState<'a> {
             graph_visible,
             graph_toggleable,
             head,
+            merge_base,
             ref_name_to_commit_index_map,
             search_state: SearchState::Inactive,
             search_options,
@@ -252,6 +271,18 @@ impl<'a> CommitListState<'a> {
             return 0; // the column collapses entirely, padding included
         }
         self.graph_cell_width + 1 // right pad
+    }
+
+    pub fn select_merge_base(&mut self) -> MergeBaseJump {
+        let Some(merge_base) = self.merge_base else {
+            return MergeBaseJump::NotScoped;
+        };
+        if !self.commit_hash_set.contains(merge_base) {
+            return MergeBaseJump::OutsideRenderedCommits;
+        }
+        let merge_base = merge_base.clone();
+        self.select_commit_hash(&merge_base);
+        MergeBaseJump::Selected
     }
 
     pub fn graph_visible(&self) -> bool {
@@ -835,7 +866,13 @@ impl CommitList<'_> {
         }
         let items: Vec<ListItem> = self
             .rendering_commit_info_iter(state)
-            .map(|(_, commit_info)| ListItem::new("│".fg(commit_info.graph_color)))
+            .map(|(_, commit_info)| {
+                if commit_info.is_merge_base {
+                    ListItem::new("◆".fg(self.ctx.color_theme.list_marker_base_fg))
+                } else {
+                    ListItem::new("│".fg(commit_info.graph_color))
+                }
+            })
             .collect();
         Widget::render(List::new(items), area, buf)
     }
@@ -865,18 +902,27 @@ impl CommitList<'_> {
                         commit.subject.to_string()
                     };
 
+                    // The merge base is bold so it can be found without scanning the one-cell
+                    // marker column. The selected row's own style still layers on top.
+                    let modifier = if commit_info.is_merge_base {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    };
                     let sub_spans =
                         if let Some(pos) = state.search_matches[state.offset + i].subject.clone() {
                             highlighted_spans(
                                 subject.into(),
                                 pos,
                                 self.ctx.color_theme.list_subject_fg,
-                                Modifier::empty(),
+                                modifier,
                                 &self.ctx.color_theme,
                                 truncate,
                             )
                         } else {
-                            vec![subject.fg(self.ctx.color_theme.list_subject_fg)]
+                            vec![subject
+                                .fg(self.ctx.color_theme.list_subject_fg)
+                                .add_modifier(modifier)]
                         };
 
                     spans.extend(sub_spans)
@@ -1224,7 +1270,7 @@ mod tests {
         subjects: &[&str],
         f: impl FnOnce(&mut CommitListState<'_>) -> R,
     ) -> R {
-        with_graph_commit_list_state(subjects, 0, true, true, f)
+        with_full_commit_list_state(subjects, 0, true, true, None, f)
     }
 
     fn with_graph_commit_list_state<R>(
@@ -1232,6 +1278,26 @@ mod tests {
         graph_cell_width: u16,
         graph_visible: bool,
         graph_toggleable: bool,
+        f: impl FnOnce(&mut CommitListState<'_>) -> R,
+    ) -> R {
+        with_full_commit_list_state(
+            subjects,
+            graph_cell_width,
+            graph_visible,
+            graph_toggleable,
+            None,
+            f,
+        )
+    }
+
+    /// `merge_base` is a raw hash rather than an index so that a base outside the rendered
+    /// commits can be set up, which is the case `MergeBaseJump::OutsideRenderedCommits` covers.
+    fn with_full_commit_list_state<R>(
+        subjects: &[&str],
+        graph_cell_width: u16,
+        graph_visible: bool,
+        graph_toggleable: bool,
+        merge_base: Option<CommitHash>,
         f: impl FnOnce(&mut CommitListState<'_>) -> R,
     ) -> R {
         let commits: Vec<Commit> = subjects
@@ -1256,6 +1322,7 @@ mod tests {
             FxHashMap::default(),
             Head::None,
             commit_hashes,
+            merge_base,
         );
         let graph = calc_graph(&repository);
         let graph_color_set = GraphColorSet::new(&GraphColorConfig::default());
@@ -1271,7 +1338,13 @@ mod tests {
             .commits
             .iter()
             .map(|commit| {
-                CommitInfo::new(commit, repository.refs(&commit.commit_hash), Color::Reset)
+                let is_merge_base = repository.merge_base() == Some(&commit.commit_hash);
+                CommitInfo::new(
+                    commit,
+                    repository.refs(&commit.commit_hash),
+                    Color::Reset,
+                    is_merge_base,
+                )
             })
             .collect();
         let mut state = CommitListState::new(
@@ -1281,11 +1354,17 @@ mod tests {
             graph_visible,
             graph_toggleable,
             repository.head(),
+            repository.merge_base(),
             FxHashMap::default(),
             SearchOptions::default(),
         );
         state.reset_height(subjects.len());
         f(&mut state)
+    }
+
+    /// The hash `with_full_commit_list_state` gives the nth subject.
+    fn test_hash(n: usize) -> CommitHash {
+        CommitHash::from(format!("{:040x}", n + 1).as_str())
     }
 
     fn input_search_query(state: &mut CommitListState<'_>, query: &str) {
@@ -1631,6 +1710,47 @@ mod tests {
             Constraint::Length(17), // Date (15 + 2 pad)
         ];
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_merge_base_jump_selects_the_base_commit() {
+        let subjects = &["a", "b", "c", "d"];
+        with_full_commit_list_state(subjects, 0, true, true, Some(test_hash(2)), |state| {
+            assert_eq!(state.selected_commit_hash(), &test_hash(0));
+            assert_eq!(state.select_merge_base(), MergeBaseJump::Selected);
+            assert_eq!(state.selected_commit_hash(), &test_hash(2));
+        });
+    }
+
+    #[test]
+    fn test_merge_base_jump_is_idempotent() {
+        let subjects = &["a", "b", "c"];
+        with_full_commit_list_state(subjects, 0, true, true, Some(test_hash(1)), |state| {
+            assert_eq!(state.select_merge_base(), MergeBaseJump::Selected);
+            assert_eq!(state.select_merge_base(), MergeBaseJump::Selected);
+            assert_eq!(state.selected_commit_hash(), &test_hash(1));
+        });
+    }
+
+    #[test]
+    fn test_merge_base_jump_without_a_base_is_not_scoped() {
+        with_commit_list_state(&["a", "b"], |state| {
+            assert_eq!(state.select_merge_base(), MergeBaseJump::NotScoped);
+            assert_eq!(state.selected_commit_hash(), &test_hash(0));
+        });
+    }
+
+    #[test]
+    fn test_merge_base_jump_reports_a_base_outside_the_rendered_commits() {
+        // A base that `--max-count` cut off: a real hash that no rendered commit carries.
+        let outside = CommitHash::from("00000000000000000000000000000000000000ff");
+        with_full_commit_list_state(&["a", "b"], 0, true, true, Some(outside), |state| {
+            assert_eq!(
+                state.select_merge_base(),
+                MergeBaseJump::OutsideRenderedCommits
+            );
+            assert_eq!(state.selected_commit_hash(), &test_hash(0));
+        });
     }
 
     #[test]

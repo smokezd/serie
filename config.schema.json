@@ -439,6 +439,11 @@
           "description": "Color for the HEAD indicator in the commit list.",
           "default": "cyan"
         },
+        "list_marker_base_fg": {
+          "type": "string",
+          "description": "Color for the marker on the merge base commit, shown when exactly two revisions are given.",
+          "default": "blue"
+        },
         "list_subject_fg": {
           "type": "string",
           "description": "Color for the commit subject in the commit list.",
@@ -684,6 +689,9 @@
           "$ref": "#/definitions/keybindArray"
         },
         "graph_toggle": {
+          "$ref": "#/definitions/keybindArray"
+        },
+        "go_to_merge_base": {
           "$ref": "#/definitions/keybindArray"
         },
         "short_copy": {

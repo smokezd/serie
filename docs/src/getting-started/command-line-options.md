@@ -106,3 +106,19 @@ _Possible values:_ `latest`, `head`
 `latest` will select the latest commit.
 
 `head` will select the commit at HEAD.
+
+## [REVSPEC]...
+
+Revisions to render, passed to `git log` as-is. If not specified, all branches, remotes and tags are rendered.
+
+When exactly two revisions are given, their common ancestor is marked in the commit list with a
+`◆` in the marker column and a bold subject, and the `go_to_merge_base` keybinding
+(<kbd>b</kbd> by default) jumps to it.
+
+```
+$ serie master topic
+```
+
+The base is computed with `git merge-base`, so it is recomputed on refresh as the branches move.
+Ranges (`master..topic`), exclusions (`^master`) and `git log` flags opt out, since none of them
+names exactly two commits.

@@ -106,6 +106,7 @@ impl<'a> App<'a> {
         ec: &'a EventController,
         refresh_view_context: Option<RefreshViewContext>,
     ) -> Self {
+        let merge_base = repository.merge_base();
         let mut ref_name_to_commit_index_map = FxHashMap::default();
         let commits = graph
             .commits
@@ -118,7 +119,8 @@ impl<'a> App<'a> {
                 }
                 let (pos_x, _) = graph.commit_pos_map[&commit.commit_hash];
                 let graph_color = graph_color_set.get(pos_x).to_ratatui_color();
-                CommitInfo::new(commit, refs, graph_color)
+                let is_merge_base = merge_base == Some(&commit.commit_hash);
+                CommitInfo::new(commit, refs, graph_color, is_merge_base)
             })
             .collect();
         let graph_cell_width = match graph_display.cell_width_type {
@@ -133,6 +135,7 @@ impl<'a> App<'a> {
             graph_display.visible,
             graph_display.toggleable,
             head,
+            merge_base,
             ref_name_to_commit_index_map,
             SearchOptions {
                 target: ctx.core_config.search.target,
