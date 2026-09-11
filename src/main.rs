@@ -28,6 +28,10 @@ mod test_git;
 #[path = "tests/revspec.rs"]
 mod revspec_tests;
 
+#[cfg(test)]
+#[path = "tests/graph_text.rs"]
+mod graph_text_tests;
+
 use std::{path::Path, rc::Rc};
 
 use app::{App, Ret};
@@ -179,14 +183,21 @@ enum GraphWidthType {
 enum GraphStyle {
     Rounded,
     Angular,
+    /// Draw the graph with strictly ASCII characters instead of images.
+    Ascii,
+    /// Draw the graph with box-drawing characters instead of images.
+    Unicode,
 }
 
-impl From<Option<GraphStyle>> for graph::GraphStyle {
+impl From<Option<GraphStyle>> for graph::GraphRenderer {
     fn from(style: Option<GraphStyle>) -> Self {
         match style {
-            Some(GraphStyle::Rounded) => graph::GraphStyle::Rounded,
-            Some(GraphStyle::Angular) => graph::GraphStyle::Angular,
-            None => graph::GraphStyle::Rounded,
+            Some(GraphStyle::Rounded) | None => {
+                graph::GraphRenderer::Image(graph::GraphStyle::Rounded)
+            }
+            Some(GraphStyle::Angular) => graph::GraphRenderer::Image(graph::GraphStyle::Angular),
+            Some(GraphStyle::Ascii) => graph::GraphRenderer::Text(graph::TextStyle::Ascii),
+            Some(GraphStyle::Unicode) => graph::GraphRenderer::Text(graph::TextStyle::Unicode),
         }
     }
 }
@@ -219,7 +230,8 @@ fn main() -> Result<()> {
     let image_protocol = args.protocol.or(core_config.option.protocol).into();
     let order = args.order.or(core_config.option.order).into();
     let graph_width = args.graph_width.or(core_config.option.graph_width);
-    let graph_style = args.graph_style.or(core_config.option.graph_style).into();
+    let graph_renderer: graph::GraphRenderer =
+        args.graph_style.or(core_config.option.graph_style).into();
     let graph_image_width_mode = graph_config.row_image_width;
     let initial_selection = args
         .initial_selection
@@ -236,6 +248,7 @@ fn main() -> Result<()> {
         ui_config,
         color_theme,
         image_protocol,
+        graph_renderer,
         revspec_label: (!revspec.is_empty()).then(|| revspec.join(" ")),
     });
 
@@ -254,7 +267,7 @@ fn main() -> Result<()> {
 
         let graph = graph::calc_graph(&repository);
 
-        let graph_display = match check::decide_graph_display(&graph, graph_width) {
+        let graph_display = match check::decide_graph_display(&graph, graph_width, graph_renderer) {
             Ok(graph_display) => graph_display,
             Err(e) => break Err(e),
         };
@@ -263,7 +276,11 @@ fn main() -> Result<()> {
             &graph,
             &graph_color_set,
             graph_display.cell_width_type,
-            graph_style,
+            // The image style only matters to the image renderer; a text graph never asks the
+            // manager for a row.
+            graph_renderer
+                .image_style()
+                .unwrap_or(graph::GraphStyle::Rounded),
             graph_image_width_mode,
             image_protocol,
         );

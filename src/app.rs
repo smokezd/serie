@@ -22,7 +22,10 @@ use crate::{
         copy_to_clipboard, exec_user_command, exec_user_command_suspend, ExternalCommandParameters,
     },
     git::{Commit, FileChange, Head, Ref, Repository},
-    graph::{CellWidthType, Graph, GraphImageManager},
+    graph::{
+        build_graph_row_text, CellWidthType, Graph, GraphImageManager, GraphRenderer,
+        CELLS_PER_LANE,
+    },
     keybind::KeyBind,
     protocol::ImageProtocol,
     search::SearchOptions,
@@ -73,6 +76,7 @@ pub struct AppContext {
     pub ui_config: UiConfig,
     pub color_theme: ColorTheme,
     pub image_protocol: ImageProtocol,
+    pub graph_renderer: GraphRenderer,
     /// The revspec the log was scoped to, shown in the status line so that a filtered view is
     /// not mistaken for the whole repository. `None` when every ref is rendered.
     pub revspec_label: Option<String>,
@@ -120,20 +124,37 @@ impl<'a> App<'a> {
                 let (pos_x, _) = graph.commit_pos_map[&commit.commit_hash];
                 let graph_color = graph_color_set.get(pos_x).to_ratatui_color();
                 let is_merge_base = merge_base == Some(&commit.commit_hash);
-                CommitInfo::new(commit, refs, graph_color, is_merge_base)
+                let graph_text = match ctx.graph_renderer.text_style() {
+                    Some(style) => build_graph_row_text(graph, style, &commit.commit_hash)
+                        .into_iter()
+                        .map(|cell| {
+                            cell.map(|c| (c.symbol, graph_color_set.get(c.lane).to_ratatui_color()))
+                        })
+                        .collect(),
+                    None => Vec::new(),
+                };
+                CommitInfo::new(commit, refs, graph_color, is_merge_base, graph_text)
             })
             .collect();
-        let graph_cell_width = match graph_display.cell_width_type {
-            CellWidthType::Double => (graph.max_pos_x + 1) as u16 * 2,
-            CellWidthType::Single => (graph.max_pos_x + 1) as u16,
+        // The whole column, padding included. The image renderer wants a trailing pad column; a
+        // text row already ends in the last lane's blank right half.
+        let text_graph = ctx.graph_renderer.text_style().is_some();
+        let graph_area_width = if text_graph {
+            ((graph.max_pos_x + 1) * CELLS_PER_LANE) as u16
+        } else {
+            match graph_display.cell_width_type {
+                CellWidthType::Double => (graph.max_pos_x + 1) as u16 * 2 + 1,
+                CellWidthType::Single => (graph.max_pos_x + 1) as u16 + 1,
+            }
         };
         let head = repository.head();
         let mut commit_list_state = CommitListState::new(
             commits,
             graph_image_manager,
-            graph_cell_width,
+            graph_area_width,
             graph_display.visible,
             graph_display.toggleable,
+            text_graph,
             head,
             merge_base,
             ref_name_to_commit_index_map,

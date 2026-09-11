@@ -85,9 +85,13 @@ The graph can be shown and hidden again at any time with the `graph_toggle` keyb
 
 ## -s, --graph-style \<TYPE\>
 
-The commit graph image edge style.
+How the commit graph is drawn.
 
-_Possible values:_ `rounded`, `angular`
+_Possible values:_ `rounded`, `angular`, `ascii`, `unicode`
+
+`rounded` and `angular` render the graph as images and need a supported terminal image protocol.
+`ascii` and `unicode` render it as text instead, which works in any terminal — no protocol, no
+image upload — and makes `--protocol` and `--graph-width` irrelevant.
 
 `rounded` will use rounded edges for the graph lines.
 
@@ -96,6 +100,29 @@ _Possible values:_ `rounded`, `angular`
 `angular` will use angular edges for the graph lines.
 
 <img src="https://raw.githubusercontent.com/lusingander/serie/master/img/style-angular.png" width=300>
+
+`unicode` draws the graph with box-drawing characters, two terminal columns per lane, the same
+spacing `git log --graph` uses:
+
+```
+●─╮  Merge branch 'topic'
+● │  Commit on master
+│ ●  Commit on topic
+●─╯  Common ancestor
+```
+
+`ascii` draws the same graph with only `*`, `|`, `-` and `+`, for terminals or fonts without
+box-drawing characters:
+
+```
+*-+  Merge branch 'topic'
+* |  Commit on master
+| *  Commit on topic
+*-+  Common ancestor
+```
+
+Unlike `git log --graph`, a turn shares the row of the commit it belongs to rather than taking a
+row of its own, so the graph has exactly one row per commit.
 
 ## -i, --initial-selection \<TYPE\>
 

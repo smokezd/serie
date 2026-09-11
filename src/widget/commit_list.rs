@@ -34,6 +34,9 @@ pub struct CommitInfo<'a> {
     refs: Vec<&'a Ref>,
     graph_color: Color,
     is_merge_base: bool,
+    /// The graph row rendered as text with lane colours already resolved, empty unless the text
+    /// renderer is in use.
+    graph_text: Vec<Option<(char, Color)>>,
 }
 
 impl<'a> CommitInfo<'a> {
@@ -42,12 +45,14 @@ impl<'a> CommitInfo<'a> {
         refs: Vec<&'a Ref>,
         graph_color: Color,
         is_merge_base: bool,
+        graph_text: Vec<Option<(char, Color)>>,
     ) -> Self {
         Self {
             commit,
             refs,
             graph_color,
             is_merge_base,
+            graph_text,
         }
     }
 }
@@ -212,9 +217,10 @@ pub struct CommitListState<'a> {
     commits: Vec<CommitInfo<'a>>,
     commit_hash_set: FxHashSet<&'a CommitHash>,
     graph_image_manager: GraphImageManager<'a>,
-    graph_cell_width: u16,
+    graph_area_width: u16,
     graph_visible: bool,
     graph_toggleable: bool,
+    text_graph: bool,
     head: &'a Head,
     merge_base: Option<&'a CommitHash>,
 
@@ -235,9 +241,10 @@ impl<'a> CommitListState<'a> {
     pub fn new(
         commits: Vec<CommitInfo<'a>>,
         graph_image_manager: GraphImageManager<'a>,
-        graph_cell_width: u16,
+        graph_area_width: u16,
         graph_visible: bool,
         graph_toggleable: bool,
+        text_graph: bool,
         head: &'a Head,
         merge_base: Option<&'a CommitHash>,
         ref_name_to_commit_index_map: FxHashMap<&'a str, usize>,
@@ -249,9 +256,10 @@ impl<'a> CommitListState<'a> {
             commits,
             commit_hash_set,
             graph_image_manager,
-            graph_cell_width,
+            graph_area_width,
             graph_visible,
             graph_toggleable,
+            text_graph,
             head,
             merge_base,
             ref_name_to_commit_index_map,
@@ -270,7 +278,7 @@ impl<'a> CommitListState<'a> {
         if !self.graph_visible {
             return 0; // the column collapses entirely, padding included
         }
-        self.graph_cell_width + 1 // right pad
+        self.graph_area_width
     }
 
     pub fn select_merge_base(&mut self) -> MergeBaseJump {
@@ -332,6 +340,9 @@ impl<'a> CommitListState<'a> {
     pub fn ensure_visible_graph_uploaded(&mut self) {
         if !self.graph_visible {
             return; // nothing is drawn, so nothing needs to reach the terminal
+        }
+        if self.text_graph {
+            return; // text rows are plain cells; no image ever reaches the terminal
         }
         self.commits
             .iter()
@@ -841,6 +852,10 @@ impl CommitList<'_> {
         if area.is_empty() {
             return;
         }
+        if self.ctx.graph_renderer.text_style().is_some() {
+            self.render_graph_text(buf, area, state);
+            return;
+        }
         self.rendering_commit_info_iter(state)
             .for_each(|(i, commit_info)| {
                 let prepared_image = state.prepared_image(commit_info);
@@ -856,6 +871,28 @@ impl CommitList<'_> {
                     cell.set_symbol(image_cell.symbol());
                     cell.set_style(image_cell.style());
                     cell.set_skip(image_cell.skip());
+                }
+            });
+    }
+
+    /// Draws the precomputed text rows. Unlike the image path there is no protocol and no upload,
+    /// so this works in any terminal.
+    fn render_graph_text(&self, buf: &mut Buffer, area: Rect, state: &CommitListState) {
+        self.rendering_commit_info_iter(state)
+            .for_each(|(i, commit_info)| {
+                let y = area.top() + i as u16;
+                for (x, text_cell) in commit_info
+                    .graph_text
+                    .iter()
+                    .take(area.width as usize)
+                    .enumerate()
+                {
+                    let Some((symbol, color)) = text_cell else {
+                        continue;
+                    };
+                    let cell = &mut buf[(area.left() + x as u16, y)];
+                    cell.set_symbol(&symbol.to_string());
+                    cell.set_fg(*color);
                 }
             });
     }
@@ -1344,6 +1381,7 @@ mod tests {
                     repository.refs(&commit.commit_hash),
                     Color::Reset,
                     is_merge_base,
+                    Vec::new(),
                 )
             })
             .collect();
@@ -1353,6 +1391,7 @@ mod tests {
             graph_cell_width,
             graph_visible,
             graph_toggleable,
+            false,
             repository.head(),
             repository.merge_base(),
             FxHashMap::default(),
@@ -1778,7 +1817,7 @@ mod tests {
 
             assert_eq!(state.toggle_graph(), GraphToggleResult::Shown);
             assert!(state.graph_visible());
-            assert_eq!(state.graph_area_cell_width(), 7); // 6 + right pad
+            assert_eq!(state.graph_area_cell_width(), 6); // the whole column, pad included
 
             assert_eq!(state.toggle_graph(), GraphToggleResult::Hidden);
             assert!(!state.graph_visible());

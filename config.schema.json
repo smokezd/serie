@@ -45,10 +45,12 @@
             },
             "graph_style": {
               "type": "string",
-              "description": "The commit graph image edge style. The value specified in the command line argument takes precedence.",
+              "description": "How the commit graph is drawn. 'rounded' and 'angular' render images; 'ascii' and 'unicode' render text and need no image protocol. The value specified in the command line argument takes precedence.",
               "enum": [
                 "rounded",
-                "angular"
+                "angular",
+                "ascii",
+                "unicode"
               ],
               "default": "rounded"
             },

@@ -158,13 +158,16 @@ The value specified in the command line argument takes precedence.
 
 ### `core.option.graph_style`
 
-The commit graph image edge style.
+How the commit graph is drawn. `rounded` and `angular` render images; `ascii` and `unicode` render
+text and need no image protocol, which also makes `protocol` and `graph_width` irrelevant.
 
 - type: `string` (enum)
 - default: `rounded`
 - possible values:
   - `rounded`
   - `angular`
+  - `ascii`
+  - `unicode`
 
 The value specified in the command line argument takes precedence.
 

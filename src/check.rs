@@ -1,7 +1,7 @@
 use ratatui::crossterm::terminal;
 
 use crate::{
-    graph::{CellWidthType, Graph},
+    graph::{CellWidthType, Graph, GraphRenderer},
     GraphWidthType, Result,
 };
 
@@ -21,7 +21,17 @@ pub struct GraphDisplay {
 pub fn decide_graph_display(
     graph: &Graph,
     cell_width_type: Option<GraphWidthType>,
+    renderer: GraphRenderer,
 ) -> Result<GraphDisplay> {
+    // A text graph needs no image cell width, so no terminal is ever too small for it: it clips
+    // like any other column. Only the initial visibility still applies.
+    if renderer.text_style().is_some() {
+        return Ok(GraphDisplay {
+            cell_width_type: CellWidthType::Single,
+            visible: !matches!(cell_width_type, Some(GraphWidthType::Hidden)),
+            toggleable: true,
+        });
+    }
     let (w, h) = terminal::size()?;
     decide_graph_display_from(graph.max_pos_x, w as usize, h as usize, cell_width_type)
 }
