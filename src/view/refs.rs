@@ -144,8 +144,16 @@ impl<'a> RefsView<'a> {
     }
 
     fn update_commit_list_selected(&mut self) {
-        if let Some(selected) = self.ref_list_state.selected_ref_name() {
-            self.as_mut_list_state().select_ref(&selected)
+        let Some(selected) = self.ref_list_state.selected_ref_name() else {
+            return;
+        };
+        if !self.as_mut_list_state().select_ref(&selected) {
+            // `HEAD` is listed from the `Head` enum alone, so it can name a commit that
+            // `--max-count` or the revspec kept off the list. Saying so beats a key that looks
+            // broken, and matches how the merge-base and tip jumps report the same situation.
+            self.tx.send(AppEvent::UpdateStatusTransient(format!(
+                "{selected} is not among the rendered commits"
+            )));
         }
     }
 

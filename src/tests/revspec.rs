@@ -276,3 +276,134 @@ fn options_are_parsed_before_and_after_the_revspec() {
     assert_eq!(after.max_count, Some(10));
     assert_eq!(after.revspec, ["master"]);
 }
+
+#[test]
+fn refresh_keeps_a_hidden_graph_from_failing_a_narrow_refresh() {
+    use crate::{refresh_graph_width, GraphWidthType};
+
+    // Startup has no refresh context, so the configured width is used as-is.
+    assert_eq!(
+        refresh_graph_width(Some(GraphWidthType::Auto), None),
+        Some(GraphWidthType::Auto)
+    );
+    // A visible graph still has to satisfy the terminal-width check on refresh.
+    assert_eq!(
+        refresh_graph_width(Some(GraphWidthType::Double), Some(true)),
+        Some(GraphWidthType::Double)
+    );
+    // A graph hidden at runtime refreshes as `Hidden`, the one width that never errors.
+    assert_eq!(
+        refresh_graph_width(Some(GraphWidthType::Double), Some(false)),
+        Some(GraphWidthType::Hidden)
+    );
+    assert_eq!(
+        refresh_graph_width(None, Some(false)),
+        Some(GraphWidthType::Hidden)
+    );
+}
+
+#[test]
+fn merge_base_ignores_flags_the_way_tip_marking_does() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let git = init_branched_repository(dir.path());
+    git.checkout("master");
+
+    // Both halves of the revspec feature have to agree that `--all` names no revision. When they
+    // disagreed, this invocation marked both tips and still reported "needs exactly two revisions".
+    let with_flag = load(dir.path(), &["master", "feature", "--all"])?;
+    let without_flag = load(dir.path(), &["master", "feature"])?;
+
+    assert!(matches!(with_flag.merge_base(), git::MergeBase::Found(_)));
+    assert_eq!(with_flag.merge_base(), without_flag.merge_base());
+    assert_eq!(with_flag.revspec_tips().len(), 2);
+
+    // A range still names no single commit, so one plain revision is left and there is no base.
+    let range = load(dir.path(), &["master", "master..feature"])?;
+    assert_eq!(range.merge_base(), &git::MergeBase::NotScoped);
+    assert!(range.revspec_tips().is_empty());
+    Ok(())
+}
+
+#[test]
+fn annotated_tags_resolve_to_the_commit_they_point_at() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let git = init_branched_repository(dir.path());
+    git.checkout("master");
+    git.tag_a("v1", "2024-01-04");
+
+    // `git rev-parse v1` prints the tag object; only `v1^{commit}` reaches the commit, so without
+    // peeling the tag matches no rendered commit and loses its marker.
+    let repository = load(dir.path(), &["v1", "feature"])?;
+    let tips = repository.revspec_tips();
+
+    assert_eq!(tips.len(), 2);
+    let head_of_master = git.rev_parse_head();
+    assert_eq!(tips[0].as_str(), head_of_master);
+    Ok(())
+}
+
+#[test]
+fn a_pathspec_is_neither_a_tip_nor_renamed() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let git = GitRepository::new(dir.path());
+    git.init();
+    git.commit_file("head", "h1", "2024-01-01");
+    git.commit("m2", "2024-01-02");
+
+    // `head` here is a file, not a revision: it must not be rewritten to `HEAD`, and it must not
+    // be counted as a revision when deciding tips.
+    let revspec = normalize_revspec(vec![
+        "master".to_string(),
+        "--".to_string(),
+        "head".to_string(),
+    ]);
+    assert_eq!(revspec, ["master", "--", "head"]);
+
+    let repository = load(dir.path(), &["master", "--", "head"])?;
+    assert_eq!(subjects(&repository), ["h1"]);
+    assert!(repository.revspec_tips().is_empty());
+    assert_eq!(repository.merge_base(), &git::MergeBase::NotScoped);
+    Ok(())
+}
+
+#[test]
+fn max_count_survives_a_pathspec_separator() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let git = GitRepository::new(dir.path());
+    git.init();
+    git.commit_file("a.txt", "a1", "2024-01-01");
+    git.commit_file("a.txt", "a2", "2024-01-02");
+
+    // Appended after the revspec, `--max-count 1` landed past the `--` and git read it as two more
+    // pathspecs, silently dropping the limit.
+    let revspec: Vec<String> = ["master", "--", "a.txt"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let repository = Repository::load(
+        dir.path(),
+        git::SortCommit::Chronological,
+        Some(1),
+        false,
+        &revspec,
+    )?;
+
+    assert_eq!(repository.all_commits().len(), 1);
+    Ok(())
+}
+
+#[test]
+fn unrelated_histories_are_distinguished_from_an_unscoped_revspec() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let git = GitRepository::new(dir.path());
+    git.init();
+    git.commit("m1", "2024-01-01");
+    git.checkout_orphan("other");
+    git.commit("o1", "2024-01-02");
+
+    // Two revisions were given, so this is not "needs exactly two revisions" — the histories
+    // simply share no commit, and the status line has to say which of the two happened.
+    let repository = load(dir.path(), &["master", "other"])?;
+    assert_eq!(repository.merge_base(), &git::MergeBase::UnrelatedHistories);
+    Ok(())
+}

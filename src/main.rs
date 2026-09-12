@@ -75,7 +75,21 @@ struct Args {
 /// `HEAD` is spelled in upper case in git, and only resolves in lower case on case-insensitive
 /// file systems, so accept `head` everywhere rather than only on some machines.
 fn normalize_revspec(revspec: Vec<String>) -> Vec<String> {
-    revspec.iter().map(|rev| normalize_rev(rev)).collect()
+    // Everything from the first `--` onward is a pathspec to git, not a revision, so a file named
+    // `head` must keep its name. `git::revision_args` draws the same line for tip and merge-base
+    // detection, so both halves of the revspec agree on where revisions stop.
+    let revisions = git::revision_args(&revspec).len();
+    revspec
+        .iter()
+        .enumerate()
+        .map(|(i, rev)| {
+            if i < revisions {
+                normalize_rev(rev)
+            } else {
+                rev.to_string()
+            }
+        })
+        .collect()
 }
 
 /// Rewrites `head` wherever it names a revision, including both ends of a range and revisions
@@ -168,6 +182,22 @@ impl From<Option<CommitOrderType>> for git::SortCommit {
     }
 }
 
+/// The width the refresh loop decides against.
+///
+/// A graph hidden by `graph_toggle` must not keep a refresh from succeeding: a terminal too narrow
+/// for a graph nobody is looking at is no more an error here than it is at startup for
+/// `-g hidden`, and `Hidden` is exactly the width that never fails. Without this the refresh
+/// aborts the whole application over a graph the user had already put away.
+fn refresh_graph_width(
+    configured: Option<GraphWidthType>,
+    restored_graph_visible: Option<bool>,
+) -> Option<GraphWidthType> {
+    match restored_graph_visible {
+        Some(false) => Some(GraphWidthType::Hidden),
+        _ => configured,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum GraphWidthType {
@@ -253,7 +283,7 @@ fn main() -> Result<()> {
     });
 
     let ec = event::EventController::init();
-    let mut refresh_view_context = None;
+    let mut refresh_view_context: Option<view::RefreshViewContext> = None;
     let mut terminal = None;
 
     // Every failure inside the loop has to leave through `break`, since a refresh runs it again
@@ -267,10 +297,18 @@ fn main() -> Result<()> {
 
         let graph = graph::calc_graph(&repository);
 
-        let graph_display = match check::decide_graph_display(&graph, graph_width, graph_renderer) {
-            Ok(graph_display) => graph_display,
-            Err(e) => break Err(e),
-        };
+        let effective_graph_width = refresh_graph_width(
+            graph_width,
+            refresh_view_context
+                .as_ref()
+                .map(|context| context.list_context().graph_visible),
+        );
+
+        let graph_display =
+            match check::decide_graph_display(&graph, effective_graph_width, graph_renderer) {
+                Ok(graph_display) => graph_display,
+                Err(e) => break Err(e),
+            };
 
         let graph_image_manager = GraphImageManager::new(
             &graph,

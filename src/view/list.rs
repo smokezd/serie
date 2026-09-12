@@ -261,6 +261,11 @@ impl<'a> ListView<'a> {
                     "Merge base needs exactly two revisions".into(),
                 ));
             }
+            MergeBaseJump::UnrelatedHistories => {
+                self.tx.send(AppEvent::UpdateStatusTransient(
+                    "The two revisions have no common ancestor".into(),
+                ));
+            }
             MergeBaseJump::OutsideRenderedCommits => {
                 self.tx.send(AppEvent::NotifyError(
                     "Merge base is not among the rendered commits".into(),

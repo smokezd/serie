@@ -46,6 +46,21 @@ impl<'a> GitRepository<'a> {
         self.run(&["commit", "--allow-empty", "-m", message], &datetime_str);
     }
 
+    /// An annotated tag, the form `git tag -a` creates. `rev-parse` prints the tag object's hash
+    /// for these, not the commit's, which is what makes them worth testing separately.
+    pub(crate) fn tag_a(&self, tag_name: &str, date: &str) {
+        let datetime_str = parse_date(date).to_rfc3339();
+        self.run(&["tag", "-a", tag_name, "-m", tag_name], &datetime_str);
+    }
+
+    /// Commits a file so the repository has a path to use as a pathspec.
+    pub(crate) fn commit_file(&self, file_name: &str, message: &str, date: &str) {
+        std::fs::write(self.path.join(file_name), message).unwrap();
+        let datetime_str = parse_date(date).to_rfc3339();
+        self.run(&["add", file_name], &datetime_str);
+        self.run(&["commit", "-m", message], &datetime_str);
+    }
+
     pub(crate) fn checkout(&self, branch_name: &str) {
         self.run(&["checkout", branch_name], "");
     }

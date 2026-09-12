@@ -21,7 +21,7 @@ use crate::{
     external::{
         copy_to_clipboard, exec_user_command, exec_user_command_suspend, ExternalCommandParameters,
     },
-    git::{Commit, CommitHash, FileChange, Head, Ref, Repository},
+    git::{Commit, CommitHash, FileChange, Head, MergeBase, Ref, Repository},
     graph::{
         build_graph_row_text, CellWidthType, Graph, GraphImageManager, GraphRenderer,
         CELLS_PER_LANE,
@@ -143,7 +143,8 @@ impl<'a> App<'a> {
                 }
                 let (pos_x, _) = graph.commit_pos_map[&commit.commit_hash];
                 let graph_color = graph_color_set.get(pos_x).to_ratatui_color();
-                let is_merge_base = merge_base == Some(&commit.commit_hash);
+                let is_merge_base =
+                    matches!(merge_base, MergeBase::Found(hash) if hash == &commit.commit_hash);
                 let is_head = head_hash.as_ref() == Some(&commit.commit_hash);
                 let graph_text = match ctx.graph_renderer.text_style() {
                     Some(style) => build_graph_row_text(graph, style, &commit.commit_hash)
@@ -186,11 +187,6 @@ impl<'a> App<'a> {
             ref_name_to_commit_index_map.insert("HEAD", index);
         }
 
-        // Tips in revspec order, mapped onto their row so rotation can walk them.
-        let tip_indexes: Vec<usize> = revspec_tips
-            .iter()
-            .filter_map(|tip| graph.commits.iter().position(|c| &c.commit_hash == tip))
-            .collect();
         let head = repository.head();
         let mut commit_list_state = CommitListState::new(
             commits,
@@ -201,7 +197,7 @@ impl<'a> App<'a> {
             text_graph,
             head,
             merge_base,
-            tip_indexes,
+            revspec_tips,
             ref_name_to_commit_index_map,
             SearchOptions {
                 target: ctx.core_config.search.target,
@@ -211,7 +207,9 @@ impl<'a> App<'a> {
         );
         if let InitialSelection::Head = initial_selection {
             match repository.head() {
-                Head::Branch { name } => commit_list_state.select_ref(name),
+                Head::Branch { name } => {
+                    commit_list_state.select_ref(name);
+                }
                 Head::Detached { target } => commit_list_state.select_commit_hash(target),
                 Head::None => {}
             }

@@ -18,7 +18,7 @@ use crate::{
     app::AppContext,
     color::ColorTheme,
     config::UserListColumnType,
-    git::{Commit, CommitHash, Head, Ref},
+    git::{Commit, CommitHash, Head, MergeBase, Ref},
     graph::GraphImageManager,
     protocol::PreparedImage,
     search::{SearchOptions, SearchTarget},
@@ -216,6 +216,8 @@ pub enum MergeBaseJump {
     Selected,
     /// The revspec did not name exactly two revisions, so there is no base to speak of.
     NotScoped,
+    /// Two revisions were named, but their histories share no commit.
+    UnrelatedHistories,
     /// A base exists but was cut from the rendered commits, e.g. by `--max-count`.
     OutsideRenderedCommits,
 }
@@ -238,9 +240,10 @@ pub struct CommitListState<'a> {
     graph_toggleable: bool,
     text_graph: bool,
     head: &'a Head,
-    merge_base: Option<&'a CommitHash>,
-    /// Indexes into `commits` of the revspec tips, in revspec order.
-    tip_indexes: Vec<usize>,
+    merge_base: &'a MergeBase,
+    /// The revspec tips as hashes, not rows: resolving to rows here would lose the difference
+    /// between "no tips given" and "every tip cut off", which the jump has to report separately.
+    revspec_tips: &'a [CommitHash],
 
     ref_name_to_commit_index_map: FxHashMap<&'a str, usize>,
 
@@ -264,8 +267,8 @@ impl<'a> CommitListState<'a> {
         graph_toggleable: bool,
         text_graph: bool,
         head: &'a Head,
-        merge_base: Option<&'a CommitHash>,
-        tip_indexes: Vec<usize>,
+        merge_base: &'a MergeBase,
+        revspec_tips: &'a [CommitHash],
         ref_name_to_commit_index_map: FxHashMap<&'a str, usize>,
         search_options: SearchOptions,
     ) -> CommitListState<'a> {
@@ -281,7 +284,7 @@ impl<'a> CommitListState<'a> {
             text_graph,
             head,
             merge_base,
-            tip_indexes,
+            revspec_tips,
             ref_name_to_commit_index_map,
             search_state: SearchState::Inactive,
             search_options,
@@ -302,8 +305,10 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn select_merge_base(&mut self) -> MergeBaseJump {
-        let Some(merge_base) = self.merge_base else {
-            return MergeBaseJump::NotScoped;
+        let merge_base = match self.merge_base {
+            MergeBase::NotScoped => return MergeBaseJump::NotScoped,
+            MergeBase::UnrelatedHistories => return MergeBaseJump::UnrelatedHistories,
+            MergeBase::Found(hash) => hash,
         };
         if !self.commit_hash_set.contains(merge_base) {
             return MergeBaseJump::OutsideRenderedCommits;
@@ -316,20 +321,23 @@ impl<'a> CommitListState<'a> {
     /// Selects the next revspec tip below the current selection, wrapping at the bottom, the way
     /// `go_to_next` walks search matches.
     pub fn select_next_tip(&mut self) -> TipJump {
-        if self.tip_indexes.is_empty() {
+        if self.revspec_tips.is_empty() {
             return TipJump::NoTips;
         }
-        let mut rendered: Vec<usize> = self
-            .tip_indexes
+        // Resolved here rather than in `App::new`: mapping tips to rows up front dropped the ones
+        // that were cut off, which collapsed "no tips given" and "every tip cut off" into the same
+        // empty vector and reported the wrong one. Walking the commits also yields rows in order.
+        let tips: FxHashSet<&CommitHash> = self.revspec_tips.iter().collect();
+        let rendered: Vec<usize> = self
+            .commits
             .iter()
-            .copied()
-            .filter(|i| *i < self.commits.len())
+            .enumerate()
+            .filter(|(_, info)| tips.contains(&info.commit.commit_hash))
+            .map(|(i, _)| i)
             .collect();
         if rendered.is_empty() {
             return TipJump::OutsideRenderedCommits;
         }
-        rendered.sort_unstable();
-        rendered.dedup();
 
         let current = self.offset + self.selected;
         let target = rendered
@@ -372,9 +380,14 @@ impl<'a> CommitListState<'a> {
         self.height = height;
 
         if self.height == 0 {
-            // No row fits, so there is nothing to clamp the selection against, and the clamping
-            // below would underflow. The selection is re-clamped once the area has rows again.
-            // Reachable whenever the terminal is shorter than the status line plus one row.
+            // No row fits, so there is no window to clamp the selection into and the arithmetic
+            // below would underflow. Collapsing to the one pair that is always in range matters
+            // more than preserving the position: leaving `offset` where it was lets `select_last`
+            // park it at `total`, which survives a resize back to a usable terminal and then
+            // indexes out of bounds. Reachable whenever the terminal is shorter than the status
+            // line plus one row.
+            self.selected = 0;
+            self.offset = self.offset.min(self.total.saturating_sub(1));
             return;
         }
 
@@ -423,9 +436,14 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn select_next(&mut self) {
-        if self.selected < (self.total - 1).min(self.height - 1) {
+        if self.selected
+            < self
+                .total
+                .saturating_sub(1)
+                .min(self.height.saturating_sub(1))
+        {
             self.selected += 1;
-        } else if self.selected + self.offset < self.total - 1 {
+        } else if self.selected + self.offset < self.total.saturating_sub(1) {
             self.offset += 1;
         }
     }
@@ -461,10 +479,13 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn select_last(&mut self) {
-        self.selected = (self.height - 1).min(self.total - 1);
-        if self.height < self.total {
-            self.offset = self.total - self.height;
-        }
+        // Derived from the last row rather than from the height, so that a zero-row area cannot
+        // leave `offset` one past the end.
+        self.selected = self
+            .height
+            .saturating_sub(1)
+            .min(self.total.saturating_sub(1));
+        self.offset = self.total.saturating_sub(1) - self.selected;
     }
 
     pub fn scroll_down(&mut self) {
@@ -479,7 +500,7 @@ impl<'a> CommitListState<'a> {
     pub fn scroll_up(&mut self) {
         if self.offset > 0 {
             self.offset -= 1;
-            if self.selected < self.height - 1 {
+            if self.selected < self.height.saturating_sub(1) {
                 self.selected += 1;
             }
         }
@@ -541,9 +562,9 @@ impl<'a> CommitListState<'a> {
 
     pub fn select_low(&mut self) {
         if self.total > self.height {
-            self.selected = self.height - 1;
+            self.selected = self.height.saturating_sub(1);
         } else {
-            self.selected = self.total - 1;
+            self.selected = self.total.saturating_sub(1);
         }
     }
 
@@ -584,15 +605,20 @@ impl<'a> CommitListState<'a> {
         self.height = height;
     }
 
-    pub fn select_ref(&mut self, ref_name: &str) {
-        if let Some(&index) = self.ref_name_to_commit_index_map.get(ref_name) {
-            if self.total > self.height {
-                self.selected = 0;
-                self.offset = index;
-            } else {
-                self.selected = index;
-            }
+    /// Returns false when the name resolves to no rendered commit, so the caller can say so. A
+    /// silent no-op here made the refs-list `HEAD` entry look like a dead key whenever HEAD's
+    /// commit was outside the rendered set — under `--max-count`, or a revspec that excludes it.
+    pub fn select_ref(&mut self, ref_name: &str) -> bool {
+        let Some(&index) = self.ref_name_to_commit_index_map.get(ref_name) else {
+            return false;
+        };
+        if self.total > self.height {
+            self.selected = 0;
+            self.offset = index;
+        } else {
+            self.selected = index;
         }
+        true
     }
 
     pub fn select_commit_hash(&mut self, commit_hash: &CommitHash) {
@@ -868,6 +894,7 @@ impl<'a> StatefulWidget for CommitList<'a> {
             self.ctx.ui_config.list.name_width,
             self.ctx.ui_config.list.date_width,
             &self.ctx.ui_config.list.columns,
+            state.text_graph,
         );
         let chunks = Layout::horizontal(constraints).split(area);
 
@@ -1335,6 +1362,7 @@ fn calc_cell_widths(
     name_width: u16,
     date_width: u16,
     columns: &[UserListColumnType],
+    text_graph: bool,
 ) -> Vec<Constraint> {
     let pad = 2;
     let (
@@ -1385,6 +1413,17 @@ fn calc_cell_widths(
     if total_width > area_width {
         hash_cell_width = 0;
     }
+    // Last resort: give the subject its minimum back out of the graph. Only a text graph can be
+    // narrowed here — it is drawn inside its column and `render_graph_text` already clips with
+    // `.take(area.width)`, so the rightmost lanes simply fall off. An image graph escapes from
+    // cell 0 and paints its full width whatever the constraint says, so shrinking its column would
+    // describe a screen that is not there. Without this the graph's `Length` beat the subject's
+    // `Min(0)` outright and a wide graph left no subject at all.
+    if text_graph {
+        let reserved = marker_cell_width.saturating_add(subject_min_width);
+        let available = area_width.saturating_sub(reserved);
+        graph_cell_width = graph_cell_width.min(available);
+    }
 
     let mut constraints = Vec::new();
     for col in columns {
@@ -1432,7 +1471,7 @@ mod tests {
         subjects: &[&str],
         f: impl FnOnce(&mut CommitListState<'_>) -> R,
     ) -> R {
-        with_full_commit_list_state(subjects, 0, true, true, None, Vec::new(), f)
+        with_full_commit_list_state(subjects, 0, true, true, MergeBase::NotScoped, Vec::new(), f)
     }
 
     fn with_graph_commit_list_state<R>(
@@ -1447,21 +1486,22 @@ mod tests {
             graph_cell_width,
             graph_visible,
             graph_toggleable,
-            None,
+            MergeBase::NotScoped,
             Vec::new(),
             f,
         )
     }
 
-    /// `merge_base` is a raw hash rather than an index so that a base outside the rendered
-    /// commits can be set up, which is the case `MergeBaseJump::OutsideRenderedCommits` covers.
+    /// `merge_base` and `revspec_tips` are raw hashes rather than rows so that a base or a tip
+    /// outside the rendered commits can be set up, which is what the `OutsideRenderedCommits`
+    /// variants cover — and what the production path is now able to construct.
     fn with_full_commit_list_state<R>(
         subjects: &[&str],
         graph_cell_width: u16,
         graph_visible: bool,
         graph_toggleable: bool,
-        merge_base: Option<CommitHash>,
-        tip_indexes: Vec<usize>,
+        merge_base: MergeBase,
+        revspec_tips: Vec<CommitHash>,
         f: impl FnOnce(&mut CommitListState<'_>) -> R,
     ) -> R {
         let commits: Vec<Commit> = subjects
@@ -1487,7 +1527,7 @@ mod tests {
             Head::None,
             commit_hashes,
             merge_base,
-            Vec::new(),
+            revspec_tips,
         );
         let graph = calc_graph(&repository);
         let graph_color_set = GraphColorSet::new(&GraphColorConfig::default());
@@ -1503,7 +1543,8 @@ mod tests {
             .commits
             .iter()
             .map(|commit| {
-                let is_merge_base = repository.merge_base() == Some(&commit.commit_hash);
+                let is_merge_base =
+                    matches!(repository.merge_base(), MergeBase::Found(hash) if hash == &commit.commit_hash);
                 CommitInfo::new(
                     commit,
                     repository.refs(&commit.commit_hash),
@@ -1524,7 +1565,7 @@ mod tests {
             false,
             repository.head(),
             repository.merge_base(),
-            tip_indexes,
+            repository.revspec_tips(),
             FxHashMap::default(),
             SearchOptions::default(),
         );
@@ -1847,6 +1888,68 @@ mod tests {
     }
 
     #[test]
+    fn test_select_ref_reports_a_name_outside_the_rendered_commits() {
+        with_commit_list_state(&["a", "b", "c"], |state| {
+            // Nothing registers ref names in this fixture, so every name misses — which is the
+            // state `HEAD` lands in when `--max-count` cuts its commit off.
+            assert!(!state.select_ref("HEAD"));
+            assert_eq!(state.selected_commit_hash(), &test_hash(0));
+        });
+    }
+
+    #[test]
+    fn test_a_text_graph_never_starves_the_subject() {
+        let columns = [
+            UserListColumnType::Graph,
+            UserListColumnType::Marker,
+            UserListColumnType::Subject,
+            UserListColumnType::Name,
+            UserListColumnType::Hash,
+            UserListColumnType::Date,
+        ];
+        let subject_min_width = 20;
+        // 13 lanes of text graph want 26 cells, which is wider than the whole area.
+        let graph_width = 26;
+
+        for area_width in [24, 40, 80] {
+            let constraints = calc_cell_widths(
+                area_width,
+                subject_min_width,
+                graph_width,
+                10,
+                10,
+                &columns,
+                true,
+            );
+            let Constraint::Length(graph) = constraints[0] else {
+                panic!("the graph column should be a fixed length");
+            };
+            let marker = 2;
+            assert!(
+                graph + marker + subject_min_width <= area_width,
+                "at {area_width} columns the graph took {graph}, leaving no room for the subject",
+            );
+        }
+
+        // The cap only ever narrows: a graph that already fits is untouched.
+        let roomy = calc_cell_widths(120, subject_min_width, graph_width, 10, 10, &columns, true);
+        assert_eq!(roomy[0], Constraint::Length(graph_width));
+    }
+
+    #[test]
+    fn test_an_image_graph_column_is_not_capped() {
+        // An image escapes from cell 0 and paints its full width regardless of the constraint, so
+        // narrowing its column would describe a screen that is not there.
+        let columns = [
+            UserListColumnType::Graph,
+            UserListColumnType::Marker,
+            UserListColumnType::Subject,
+        ];
+        let constraints = calc_cell_widths(24, 20, 26, 10, 10, &columns, false);
+        assert_eq!(constraints[0], Constraint::Length(26));
+    }
+
+    #[test]
     fn test_calc_cell_widths_all_columns() {
         let area_width = 80;
         let subject_min_width = 20;
@@ -1869,6 +1972,7 @@ mod tests {
             name_width,
             date_width,
             &columns,
+            false,
         );
 
         let expected = vec![
@@ -1884,10 +1988,10 @@ mod tests {
 
     fn with_tips<R>(
         subjects: &[&str],
-        tips: Vec<usize>,
+        tips: Vec<CommitHash>,
         f: impl FnOnce(&mut CommitListState<'_>) -> R,
     ) -> R {
-        with_full_commit_list_state(subjects, 0, true, true, None, tips, f)
+        with_full_commit_list_state(subjects, 0, true, true, MergeBase::NotScoped, tips, f)
     }
 
     /// The two marker cells as a string, so a test reads like the column looks.
@@ -1955,39 +2059,51 @@ mod tests {
 
     #[test]
     fn test_tip_rotation_walks_downward_and_wraps() {
-        with_tips(&["a", "b", "c", "d", "e"], vec![1, 3], |state| {
-            // Starts on row 0, so the first press lands on the tip below it.
-            assert_eq!(state.select_next_tip(), TipJump::Selected);
-            assert_eq!(state.selected_commit_hash(), &test_hash(1));
+        with_tips(
+            &["a", "b", "c", "d", "e"],
+            vec![test_hash(1), test_hash(3)],
+            |state| {
+                // Starts on row 0, so the first press lands on the tip below it.
+                assert_eq!(state.select_next_tip(), TipJump::Selected);
+                assert_eq!(state.selected_commit_hash(), &test_hash(1));
 
-            assert_eq!(state.select_next_tip(), TipJump::Selected);
-            assert_eq!(state.selected_commit_hash(), &test_hash(3));
+                assert_eq!(state.select_next_tip(), TipJump::Selected);
+                assert_eq!(state.selected_commit_hash(), &test_hash(3));
 
-            // Past the last tip it wraps to the first rather than stopping.
-            assert_eq!(state.select_next_tip(), TipJump::Selected);
-            assert_eq!(state.selected_commit_hash(), &test_hash(1));
-        });
+                // Past the last tip it wraps to the first rather than stopping.
+                assert_eq!(state.select_next_tip(), TipJump::Selected);
+                assert_eq!(state.selected_commit_hash(), &test_hash(1));
+            },
+        );
     }
 
     #[test]
     fn test_tip_rotation_is_relative_to_the_current_selection() {
-        with_tips(&["a", "b", "c", "d", "e"], vec![1, 3], |state| {
-            // Scrolling past both tips means the next press wraps to the top one.
-            state.select_commit_hash(&test_hash(4));
-            assert_eq!(state.select_next_tip(), TipJump::Selected);
-            assert_eq!(state.selected_commit_hash(), &test_hash(1));
-        });
+        with_tips(
+            &["a", "b", "c", "d", "e"],
+            vec![test_hash(1), test_hash(3)],
+            |state| {
+                // Scrolling past both tips means the next press wraps to the top one.
+                state.select_commit_hash(&test_hash(4));
+                assert_eq!(state.select_next_tip(), TipJump::Selected);
+                assert_eq!(state.selected_commit_hash(), &test_hash(1));
+            },
+        );
     }
 
     #[test]
     fn test_tip_rotation_visits_tips_in_row_order_not_revspec_order() {
         // Revspec order decides the ordinal shown in the marker column; rotation follows the
         // list, so walking down never jumps backwards.
-        with_tips(&["a", "b", "c"], vec![2, 0], |state| {
-            state.select_commit_hash(&test_hash(0));
-            assert_eq!(state.select_next_tip(), TipJump::Selected);
-            assert_eq!(state.selected_commit_hash(), &test_hash(2));
-        });
+        with_tips(
+            &["a", "b", "c"],
+            vec![test_hash(2), test_hash(0)],
+            |state| {
+                state.select_commit_hash(&test_hash(0));
+                assert_eq!(state.select_next_tip(), TipJump::Selected);
+                assert_eq!(state.selected_commit_hash(), &test_hash(2));
+            },
+        );
     }
 
     #[test]
@@ -2000,8 +2116,9 @@ mod tests {
 
     #[test]
     fn test_tip_rotation_reports_tips_outside_the_rendered_commits() {
-        // `--max-count` can cut every tip off; the indexes then point past the list.
-        with_tips(&["a", "b"], vec![7, 9], |state| {
+        // `--max-count` can cut every tip off. These are real hashes that no rendered commit
+        // carries — the state the production path builds when a revspec tip is not on screen.
+        with_tips(&["a", "b"], vec![test_hash(7), test_hash(9)], |state| {
             assert_eq!(state.select_next_tip(), TipJump::OutsideRenderedCommits);
             assert_eq!(state.selected_commit_hash(), &test_hash(0));
         });
@@ -2015,7 +2132,7 @@ mod tests {
             0,
             true,
             true,
-            Some(test_hash(2)),
+            MergeBase::Found(test_hash(2)),
             Vec::new(),
             |state| {
                 assert_eq!(state.selected_commit_hash(), &test_hash(0));
@@ -2033,7 +2150,7 @@ mod tests {
             0,
             true,
             true,
-            Some(test_hash(1)),
+            MergeBase::Found(test_hash(1)),
             Vec::new(),
             |state| {
                 assert_eq!(state.select_merge_base(), MergeBaseJump::Selected);
@@ -2060,7 +2177,7 @@ mod tests {
             0,
             true,
             true,
-            Some(outside),
+            MergeBase::Found(outside),
             Vec::new(),
             |state| {
                 assert_eq!(
@@ -2073,19 +2190,42 @@ mod tests {
     }
 
     #[test]
-    fn test_zero_height_area_keeps_the_selection_intact() {
+    fn test_zero_height_area_leaves_an_in_range_selection() {
         // A terminal shorter than the status line leaves the list no rows at all. `-g hidden`
         // reaches this, since it is the one width that does not refuse to start on a tiny
         // terminal.
         with_commit_list_state(&["a", "b", "c"], |state| {
-            state.select_next();
-            let before = state.current_list_status();
-
             state.update_height(0);
-            assert_eq!(state.current_list_status(), (before.0, before.1, 0));
 
+            // Every navigation key has to survive a zero-row area, not just render.
+            state.select_next();
+            state.select_last();
+            state.select_low();
+            state.scroll_up();
+            state.scroll_down();
+
+            let (selected, offset, height) = state.current_list_status();
+            assert_eq!(height, 0);
+            assert!(selected + offset < 3, "selection left the commit list");
+
+            // And the state has to still be in range once rows come back.
             state.update_height(3);
-            assert_eq!(state.current_list_status(), before);
+            let (selected, offset, _) = state.current_list_status();
+            assert!(selected + offset < 3);
+        });
+    }
+
+    #[test]
+    fn test_select_last_at_zero_height_survives_a_resize_back() {
+        // `select_last` used to set `offset = total - height`, which is `total` itself when no row
+        // fits. The out-of-range offset outlived the resize and panicked on the next detail view.
+        with_commit_list_state(&["a", "b", "c"], |state| {
+            state.update_height(0);
+            state.select_last();
+            state.update_height(3);
+
+            let (selected, offset, _) = state.current_list_status();
+            assert_eq!(selected + offset, 2, "the last commit should be selected");
         });
     }
 
@@ -2164,6 +2304,7 @@ mod tests {
             name_width,
             date_width,
             &columns,
+            false,
         );
 
         let expected = vec![
@@ -2201,6 +2342,7 @@ mod tests {
             name_width,
             date_width,
             &columns,
+            false,
         );
         assert_eq!(
             visible,
@@ -2221,6 +2363,7 @@ mod tests {
             name_width,
             date_width,
             &columns,
+            false,
         );
         assert_eq!(
             hidden,
@@ -2258,6 +2401,7 @@ mod tests {
             name_width,
             date_width,
             &columns,
+            false,
         );
 
         // Graph + Marker + Subject + Hash = 6 + 2 + 20 + 9 = 37 > 30
@@ -2296,6 +2440,7 @@ mod tests {
             name_width,
             date_width,
             &columns,
+            false,
         );
 
         // Graph + Marker + Subject + Hash = 6 + 2 + 20 + 9 = 37
@@ -2335,6 +2480,7 @@ mod tests {
             name_width,
             date_width,
             &columns,
+            false,
         );
 
         // Graph + Marker + Subject + Date + Hash = 6 + 2 + 20 + 17 + 9 = 54 <= 60
@@ -2372,6 +2518,7 @@ mod tests {
             name_width,
             date_width,
             &columns,
+            false,
         );
 
         let expected = vec![

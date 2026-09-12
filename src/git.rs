@@ -84,6 +84,20 @@ impl Ref {
     }
 }
 
+/// What `git merge-base` had to say about the revspec.
+///
+/// Three states, because two of them used to be one: an absent base meant both "the revspec did
+/// not name two revisions" and "the two it named share no history", so unrelated branches were
+/// reported as a malformed revspec.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergeBase {
+    /// The revspec named something other than exactly two revisions.
+    NotScoped,
+    /// Exactly two revisions, with no common ancestor between them.
+    UnrelatedHistories,
+    Found(CommitHash),
+}
+
 #[derive(Debug, Clone)]
 pub enum Head {
     Branch { name: String },
@@ -115,7 +129,7 @@ pub struct Repository {
     // to preserve order of the original commits from `git log`, we store the commit hashes
     commit_hashes: Vec<CommitHash>,
     // `Some` only when the revspec named exactly two revisions; see `two_revisions`
-    merge_base: Option<CommitHash>,
+    merge_base: MergeBase,
     // The commit each plain revision in the revspec resolves to, in the order given. Empty
     // unless the revspec named two or more of them; see `plain_revisions`.
     revspec_tips: Vec<CommitHash>,
@@ -162,7 +176,13 @@ impl Repository {
             ref_map.retain(|hash, _| commit_map.contains_key(hash));
         }
 
-        let merge_base = two_revisions(revspec).and_then(|(a, b)| load_merge_base(path, a, b));
+        let merge_base = match two_revisions(revspec) {
+            Some((a, b)) => match load_merge_base(path, a, b) {
+                Some(hash) => MergeBase::Found(hash),
+                None => MergeBase::UnrelatedHistories,
+            },
+            None => MergeBase::NotScoped,
+        };
         let revspec_tips = load_revspec_tips(path, revspec);
 
         Ok(Self::new(
@@ -186,7 +206,7 @@ impl Repository {
         ref_map: RefMap,
         head: Head,
         commit_hashes: Vec<CommitHash>,
-        merge_base: Option<CommitHash>,
+        merge_base: MergeBase,
         revspec_tips: Vec<CommitHash>,
     ) -> Self {
         Self {
@@ -250,8 +270,8 @@ impl Repository {
 
     /// The common ancestor of the two revisions the revspec named, if it named exactly two.
     /// The commit is not necessarily rendered: `--max-count` can cut it off.
-    pub fn merge_base(&self) -> Option<&CommitHash> {
-        self.merge_base.as_ref()
+    pub fn merge_base(&self) -> &MergeBase {
+        &self.merge_base
     }
 
     pub fn commit_detail(&self, commit_hash: &CommitHash) -> (Commit, Vec<FileChange>) {
@@ -273,23 +293,37 @@ fn check_git_repository(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The revspec elements that `git log` reads as revisions: everything before the first `--`.
+///
+/// `serie -- main -- README.md` reaches us as `["main", "--", "README.md"]`, and git treats
+/// everything past the separator as pathspecs. Scanning the whole slice for revisions would mark a
+/// file as a branch tip and rewrite its name, so the separator ends the search here too.
+pub fn revision_args(revspec: &[String]) -> &[String] {
+    match revspec.iter().position(|arg| arg == "--") {
+        Some(i) => &revspec[..i],
+        None => revspec,
+    }
+}
+
 /// A merge base only means something when the revspec names exactly two commits, so a range, an
 /// exclusion or a `git log` flag opts out. Revision modifiers (`HEAD~2`, `branch@{1}`) are kept,
 /// since each still names a single commit.
+///
+/// Defined in terms of [`plain_revisions`] so the two cannot disagree: a flag or a range is
+/// skipped in both, rather than disqualifying the whole revspec here and being filtered out there.
+/// That divergence used to make `serie -- main topic --all` mark both tips while reporting that a
+/// merge base needs exactly two revisions.
 fn two_revisions(revspec: &[String]) -> Option<(&str, &str)> {
-    let [a, b] = revspec else { return None };
-    for rev in [a, b] {
-        if rev.starts_with('-') || rev.starts_with('^') || rev.contains("..") {
-            return None;
-        }
-    }
+    let [a, b] = plain_revisions(revspec)[..] else {
+        return None;
+    };
     Some((a, b))
 }
 
 /// The revspec elements that name a single commit, in order. A range, an exclusion or a `git log`
 /// flag names no single commit, so each is skipped rather than disqualifying the whole revspec.
 fn plain_revisions(revspec: &[String]) -> Vec<&str> {
-    revspec
+    revision_args(revspec)
         .iter()
         .map(String::as_str)
         .filter(|rev| !(rev.starts_with('-') || rev.starts_with('^') || rev.contains("..")))
@@ -303,9 +337,18 @@ fn load_revspec_tips(path: &Path, revspec: &[String]) -> Vec<CommitHash> {
     if revisions.len() < 2 {
         return Vec::new();
     }
+    // `^{commit}` peels to the commit the revision names. Without it an annotated tag resolves to
+    // its own tag object, which matches no rendered commit, so the tag silently loses its marker
+    // while later revisions keep their ordinals. It also makes a non-revision fail loudly instead
+    // of being stored as a tip: `rev-parse master a.txt` prints a hash and `a.txt`, which the
+    // count check below cannot tell apart from two resolved revisions.
+    let peeled: Vec<String> = revisions
+        .iter()
+        .map(|rev| format!("{rev}^{{commit}}"))
+        .collect();
     let output = Command::new("git")
         .arg("rev-parse")
-        .args(&revisions)
+        .args(&peeled)
         .current_dir(path)
         .output();
     let Ok(output) = output else {
@@ -389,6 +432,13 @@ fn load_all_commits(
     .arg("--date=iso-strict")
     .arg("-z"); // use NUL as a delimiter
 
+    // Before the revspec, not after it: a revspec may carry its own `--`, and git reads everything
+    // past that separator as pathspecs. Appended afterwards, `--max-count` and its value would be
+    // taken for two file names and the limit silently dropped.
+    if let Some(n) = max_count {
+        cmd.arg("--max-count").arg(n.to_string());
+    }
+
     if revspec.is_empty() {
         // exclude stashes and other refs
         cmd.arg("--branches").arg("--remotes").arg("--tags");
@@ -404,10 +454,6 @@ fn load_all_commits(
     } else {
         // passed through to git as-is, so any revision, range or pathspec works
         cmd.args(revspec);
-    }
-
-    if let Some(n) = max_count {
-        cmd.arg("--max-count").arg(n.to_string());
     }
 
     cmd.current_dir(path)
