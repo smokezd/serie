@@ -10,23 +10,30 @@ rendered, which is the default behaviour.
 The arguments are passed to `git log` as they are, so anything it accepts works:
 
 ```
-$ serie main              # only the commits reachable from main
-$ serie main my-feature   # the commits reachable from either branch
-$ serie head              # the commits reachable from HEAD
-$ serie main..my-feature  # only what my-feature adds on top of main
-$ serie main -- README.md # only the commits that touch README.md
+$ serie main             # only the commits reachable from main
+$ serie main my-feature  # the commits reachable from either branch
+$ serie head             # the commits reachable from HEAD
+$ serie main..my-feature # only what my-feature adds on top of main
 ```
 
 `head` is accepted in any case and is passed to git as `HEAD`, since a lower case `head` resolves
 only on case-insensitive file systems. It is rewritten wherever it names a revision, so `head~2`,
 `^head` and `head~3..head` all work as well.
 
-Options of `git log` itself need to be separated with `--`, because `serie` parses its own options
-first:
+`serie` parses its own options first, so anything meant for `git log` — a flag, or a pathspec —
+has to follow a `--`:
 
 ```
-$ serie -- --first-parent main
+$ serie -- --first-parent main      # a git log flag
+$ serie -- main -- README.md        # only the commits that touch README.md
 ```
+
+The first `--` ends `serie`'s own options and is not passed on, so a pathspec needs the second one:
+that is the `--` git itself sees, and it is what makes a path unambiguous even when no such file
+exists in the working tree any more.
+
+Everything after the first `--` reaches `git log` untouched, and everything after a second one is
+treated as a path rather than a revision — not rewritten, and not marked as a branch tip.
 
 When a revspec is given:
 
@@ -35,6 +42,44 @@ When a revspec is given:
   repository.
 - A merge commit whose second parent is not rendered (which ranges such as `main..my-feature` can
   produce) is drawn without its second edge.
+
+When exactly two revisions are given, their common ancestor is marked in the commit list with a
+`◆` in the marker column and a bold subject, and the `go_to_merge_base` keybinding
+(<kbd>b</kbd> by default) jumps to it.
+
+```
+$ serie master topic
+```
+
+When two or more revisions are given, each one's tip is marked in the marker column with its
+position in the revspec (`1`, `2`, `3`, ...), and the `go_to_next_tip` keybinding (<kbd>t</kbd> by
+default) rotates through them, walking down the list and wrapping at the bottom. A commit that is
+both a tip and the merge base shows the merge base marker, and is still reachable by rotation.
+
+```
+$ serie master topic feature
+```
+
+Ranges, exclusions and flags contribute no tip, but do not stop the other revisions from being
+marked: `serie -- master topic --all` still marks `master` and `topic`.
+
+The marker column is two cells wide. The first carries what the revspec asked about — the merge
+base (`◆`) or a tip's position (`1`, `2`, ...) — and the second carries HEAD (`@`), falling back to
+the lane tick. A commit that is both a tip and HEAD therefore shows both:
+
+```
+1@  the revision you passed, and where you are
+ @  where you are
+2│  another revision you passed
+◆│  the merge base
+```
+
+The merge base and a tip share the first cell, and the base wins; the ordinal stays reachable with
+`go_to_next_tip`. HEAD is marked whether it is attached to a branch or detached.
+
+The base is computed with `git merge-base`, so it is recomputed on refresh as the branches move.
+Ranges (`master..topic`), exclusions (`^master`) and `git log` flags opt out, since none of them
+names exactly two commits.
 
 ## -n, --max-count \<NUMBER\>
 
@@ -67,7 +112,8 @@ _Possible values:_ `chrono`, `topo`
 
 ## -g, --graph-width \<TYPE\>
 
-The character width that a graph image unit cell occupies.
+The character width that a graph image unit cell occupies. With a text `--graph-style` there is no
+image cell, so only `hidden` has any effect.
 
 _Possible values:_ `auto`, `double`, `single`, `hidden`
 
@@ -91,7 +137,9 @@ _Possible values:_ `rounded`, `angular`, `ascii`, `unicode`
 
 `rounded` and `angular` render the graph as images and need a supported terminal image protocol.
 `ascii` and `unicode` render it as text instead, which works in any terminal — no protocol, no
-image upload — and makes `--protocol` and `--graph-width` irrelevant.
+image upload — so `--protocol` no longer applies. Of the `--graph-width` values, `auto`, `single`
+and `double` are image cell widths and are ignored; `hidden` still applies, and still starts
+without the graph column.
 
 `rounded` will use rounded edges for the graph lines.
 
@@ -134,44 +182,3 @@ _Possible values:_ `latest`, `head`
 
 `head` will select the commit at HEAD.
 
-## [REVSPEC]...
-
-Revisions to render, passed to `git log` as-is. If not specified, all branches, remotes and tags are rendered.
-
-When exactly two revisions are given, their common ancestor is marked in the commit list with a
-`◆` in the marker column and a bold subject, and the `go_to_merge_base` keybinding
-(<kbd>b</kbd> by default) jumps to it.
-
-```
-$ serie master topic
-```
-
-When two or more revisions are given, each one's tip is marked in the marker column with its
-position in the revspec (`1`, `2`, `3`, ...), and the `go_to_next_tip` keybinding (<kbd>t</kbd> by
-default) rotates through them, walking down the list and wrapping at the bottom. A commit that is
-both a tip and the merge base shows the merge base marker, and is still reachable by rotation.
-
-```
-$ serie master topic feature
-```
-
-Ranges, exclusions and flags contribute no tip, but do not stop the other revisions from being
-marked: `serie master topic --all` still marks `master` and `topic`.
-
-The marker column is two cells wide. The first carries what the revspec asked about — the merge
-base (`◆`) or a tip's position (`1`, `2`, ...) — and the second carries HEAD (`@`), falling back to
-the lane tick. A commit that is both a tip and HEAD therefore shows both:
-
-```
-1@  the revision you passed, and where you are
- @  where you are
-2│  another revision you passed
-◆│  the merge base
-```
-
-The merge base and a tip share the first cell, and the base wins; the ordinal stays reachable with
-`go_to_next_tip`. HEAD is marked whether it is attached to a branch or detached.
-
-The base is computed with `git merge-base`, so it is recomputed on refresh as the branches move.
-Ranges (`master..topic`), exclusions (`^master`) and `git log` flags opt out, since none of them
-names exactly two commits.

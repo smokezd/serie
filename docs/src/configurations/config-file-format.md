@@ -161,7 +161,8 @@ The value specified in the command line argument takes precedence.
 ### `core.option.graph_style`
 
 How the commit graph is drawn. `rounded` and `angular` render images; `ascii` and `unicode` render
-text and need no image protocol, which also makes `protocol` and `graph_width` irrelevant.
+text and need no image protocol, so `protocol` no longer applies. Of the `graph_width` values,
+`auto`, `single` and `double` are image cell widths and are ignored; `hidden` still applies.
 
 - type: `string` (enum)
 - default: `rounded`

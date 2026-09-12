@@ -84,10 +84,10 @@ Options:
   -n, --max-count <NUMBER>        Maximum number of commits to render
   -p, --protocol <TYPE>           Image protocol to render graph [default: auto] [possible values: auto, iterm, kitty, kitty-unicode]
   -o, --order <TYPE>              Commit ordering algorithm [default: chrono] [possible values: chrono, topo]
-  -g, --graph-width <TYPE>        Commit graph image cell width [default: auto] [possible values: auto, double, single]
-  -s, --graph-style <TYPE>        Commit graph image edge style [default: rounded] [possible values: rounded, angular]
+  -g, --graph-width <TYPE>        Commit graph image cell width; only `hidden` applies to a text style [default: auto] [possible values: auto, double, single, hidden]
+  -s, --graph-style <TYPE>        Commit graph style: image edges, or text [default: rounded] [possible values: rounded, angular, ascii, unicode]
   -i, --initial-selection <TYPE>  Initial selection of commit [default: latest] [possible values: latest, head]
-  -h, --help                      Print help
+  -h, --help                      Print help (see more with '--help')
   -V, --version                   Print version
 ```
 

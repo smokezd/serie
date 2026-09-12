@@ -55,11 +55,11 @@ struct Args {
     #[arg(short, long, value_name = "TYPE")]
     order: Option<CommitOrderType>,
 
-    /// Commit graph image cell width [default: auto]
+    /// Commit graph image cell width; only `hidden` applies to a text style [default: auto]
     #[arg(short, long, value_name = "TYPE")]
     graph_width: Option<GraphWidthType>,
 
-    /// Commit graph image edge style [default: rounded]
+    /// Commit graph style: image edges, or text [default: rounded]
     #[arg(short = 's', long, value_name = "TYPE")]
     graph_style: Option<GraphStyle>,
 
