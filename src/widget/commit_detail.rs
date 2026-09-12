@@ -14,10 +14,65 @@ use crate::{
     git::{Commit, FileChange, Ref},
 };
 
+/// How much of the commit message the detail pane shows.
+///
+/// A long message pushes the changed files off the bottom of the pane, which is the one thing the
+/// pane is usually open to show, so the message can be capped instead of scrolled past.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum MessageLines {
+    #[default]
+    Full,
+    Five,
+    Ten,
+}
+
+impl MessageLines {
+    /// Cycles toward the shortest first: the reason to reach for this key is usually to get the
+    /// changed files on screen, and five lines does that in one press.
+    pub fn next(self) -> Self {
+        match self {
+            MessageLines::Full => MessageLines::Five,
+            MessageLines::Five => MessageLines::Ten,
+            MessageLines::Ten => MessageLines::Full,
+        }
+    }
+
+    /// Lines the message block may occupy, subject and its blank separator included.
+    fn limit(self) -> Option<usize> {
+        match self {
+            MessageLines::Full => None,
+            MessageLines::Five => Some(5),
+            MessageLines::Ten => Some(10),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct CommitDetailState {
     height: usize,
     offset: usize,
+    message_lines: MessageLines,
+}
+
+impl CommitDetailState {
+    pub fn new(message_lines: MessageLines) -> Self {
+        CommitDetailState {
+            message_lines,
+            ..Default::default()
+        }
+    }
+
+    pub fn message_lines(&self) -> MessageLines {
+        self.message_lines
+    }
+
+    /// Moves to the next setting and returns it. The scroll offset goes back to the top, since the
+    /// line the user was looking at has usually just moved or disappeared.
+    pub fn toggle_message_lines(&mut self) -> MessageLines {
+        self.message_lines = self.message_lines.next();
+        self.offset = 0;
+        self.message_lines
+    }
 }
 
 impl CommitDetailState {
@@ -84,7 +139,7 @@ impl StatefulWidget for CommitDetail<'_> {
         let [labels_area, value_area] =
             Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(area);
 
-        let (mut label_lines, mut value_lines) = self.contents(area);
+        let (mut label_lines, mut value_lines) = self.contents(area, state.message_lines);
 
         let content_area_height = area.height as usize - 1; // minus the top border
         self.update_state(state, value_lines.len(), content_area_height);
@@ -122,7 +177,7 @@ impl CommitDetail<'_> {
         paragraph.render(area, buf);
     }
 
-    fn contents(&self, area: Rect) -> (Vec<Line<'_>>, Vec<Line<'_>>) {
+    fn contents(&self, area: Rect, message_lines: MessageLines) -> (Vec<Line<'_>>, Vec<Line<'_>>) {
         let mut label_lines: Vec<Line> = Vec::new();
         let mut value_lines: Vec<Line> = Vec::new();
 
@@ -150,7 +205,7 @@ impl CommitDetail<'_> {
         }
 
         value_lines.push(self.divider_line(area.width as usize));
-        value_lines.extend(self.commit_message_lines());
+        value_lines.extend(self.commit_message_lines(message_lines));
 
         value_lines.push(self.divider_line(area.width as usize));
         value_lines.extend(self.changes_lines());
@@ -255,7 +310,7 @@ impl CommitDetail<'_> {
         Line::from(spans)
     }
 
-    fn commit_message_lines(&self) -> Vec<Line<'_>> {
+    fn commit_message_lines(&self, message_lines: MessageLines) -> Vec<Line<'_>> {
         let subject_line = Line::from(self.commit.subject.as_str().bold());
 
         let mut lines = vec![subject_line];
@@ -269,6 +324,19 @@ impl CommitDetail<'_> {
         lines.push(self.empty_line());
         lines.extend(body_lines);
 
+        let Some(limit) = message_lines.limit() else {
+            return lines;
+        };
+        if lines.len() <= limit {
+            return lines;
+        }
+        // The count names what is hidden, so the key does not have to be pressed to find out
+        // whether anything was.
+        let hidden = lines.len() - limit;
+        lines.truncate(limit);
+        lines.push(
+            Line::from(format!("… {hidden} more lines")).fg(self.ctx.color_theme.detail_label_fg),
+        );
         lines
     }
 
@@ -333,4 +401,26 @@ fn has_refs(refs: &[Ref]) -> bool {
             Ref::Branch { .. } | Ref::RemoteBranch { .. } | Ref::Tag { .. }
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MessageLines;
+
+    #[test]
+    fn test_toggle_reaches_the_shortest_first() {
+        // One press is what someone does to get the changed files on screen, so it should be the
+        // press that frees the most room.
+        let five = MessageLines::Full.next();
+        assert_eq!(five, MessageLines::Five);
+        assert_eq!(five.next(), MessageLines::Ten);
+        assert_eq!(five.next().next(), MessageLines::Full);
+    }
+
+    #[test]
+    fn test_limits_match_the_names() {
+        assert_eq!(MessageLines::Full.limit(), None);
+        assert_eq!(MessageLines::Five.limit(), Some(5));
+        assert_eq!(MessageLines::Ten.limit(), Some(10));
+    }
 }

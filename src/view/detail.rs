@@ -12,7 +12,7 @@ use crate::{
     git::{Commit, FileChange, Ref, Repository},
     view::{ListRefreshViewContext, RefreshViewContext},
     widget::{
-        commit_detail::{CommitDetail, CommitDetailState},
+        commit_detail::{CommitDetail, CommitDetailState, MessageLines},
         commit_list::{CommitList, CommitListState},
     },
 };
@@ -45,12 +45,13 @@ impl<'a> DetailView<'a> {
         changes: Vec<FileChange>,
         refs: Vec<Ref>,
         detail_height: u16,
+        message_lines: MessageLines,
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> DetailView<'a> {
         DetailView {
             commit_list_state: Some(commit_list_state),
-            commit_detail_state: CommitDetailState::default(),
+            commit_detail_state: CommitDetailState::new(message_lines),
             commit,
             changes,
             refs,
@@ -64,6 +65,11 @@ impl<'a> DetailView<'a> {
     /// The pane height as the user has left it, so it survives closing and reopening the view.
     pub fn detail_height(&self) -> u16 {
         self.detail_height
+    }
+
+    /// How much of the message the user has left on show, kept for the same reason.
+    pub fn message_lines(&self) -> MessageLines {
+        self.commit_detail_state.message_lines()
     }
 
     /// One row is always left to the commit list, and the pane never shrinks past a single row.
@@ -135,6 +141,15 @@ impl<'a> DetailView<'a> {
             }
             UserEvent::DetailHeightDecrease => {
                 self.resize_detail(-(count as i32));
+            }
+            UserEvent::DetailMessageToggle => {
+                let message_lines = self.commit_detail_state.toggle_message_lines();
+                self.tx
+                    .send(AppEvent::UpdateStatusTransient(match message_lines {
+                        MessageLines::Full => "Commit message: full".into(),
+                        MessageLines::Five => "Commit message: 5 lines".into(),
+                        MessageLines::Ten => "Commit message: 10 lines".into(),
+                    }));
             }
             UserEvent::HelpToggle => {
                 self.tx.send(AppEvent::OpenHelp);
@@ -245,6 +260,7 @@ impl<'a> DetailView<'a> {
         let list_state = self.as_list_state();
         let mut list_context = ListRefreshViewContext::from(list_state);
         list_context.detail_height = Some(self.detail_height);
+        list_context.detail_message_lines = Some(self.message_lines());
         let context = RefreshViewContext::Detail { list_context };
         self.tx.send(AppEvent::Refresh(context));
     }

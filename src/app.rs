@@ -27,7 +27,10 @@ use crate::{
     protocol::ImageProtocol,
     search::SearchOptions,
     view::{RefreshViewContext, View},
-    widget::commit_list::{CommitInfo, CommitListState},
+    widget::{
+        commit_detail::MessageLines,
+        commit_list::{CommitInfo, CommitListState},
+    },
 };
 
 #[derive(Debug, Default)]
@@ -93,6 +96,8 @@ pub struct App<'a> {
     /// Rows the detail pane takes when it is opened. Owned here rather than by `DetailView`, which
     /// is rebuilt every time the view opens, so a resize outlives closing the pane.
     detail_height: u16,
+    /// How much of the commit message the pane shows, kept across views for the same reason.
+    detail_message_lines: MessageLines,
     ctx: Rc<AppContext>,
     ec: &'a EventController,
 }
@@ -206,12 +211,17 @@ impl<'a> App<'a> {
             .as_ref()
             .and_then(|context| context.list_context().detail_height)
             .unwrap_or(ctx.ui_config.detail.height);
+        let detail_message_lines = refresh_view_context
+            .as_ref()
+            .and_then(|context| context.list_context().detail_message_lines)
+            .unwrap_or_default();
 
         let mut app = Self {
             repository,
             view,
             app_status: AppStatus::default(),
             detail_height,
+            detail_message_lines,
             ctx,
             ec,
         };
@@ -353,10 +363,11 @@ impl App<'_> {
                     self.cleanup_graph_images()?;
                     // Only the detail view sets this, so fill it in for refreshes taken from any
                     // other view; otherwise a resize is lost by refreshing from the commit list.
-                    context
-                        .list_context_mut()
-                        .detail_height
-                        .get_or_insert(self.detail_height);
+                    let list_context = context.list_context_mut();
+                    list_context.detail_height.get_or_insert(self.detail_height);
+                    list_context
+                        .detail_message_lines
+                        .get_or_insert(self.detail_message_lines);
                     let request = RefreshRequest { context };
                     return Ok(Ret::Refresh(request));
                 }
@@ -563,6 +574,7 @@ impl App<'_> {
             changes,
             refs,
             self.detail_height,
+            self.detail_message_lines,
             self.ctx.clone(),
             self.ec.sender(),
         );
@@ -572,6 +584,7 @@ impl App<'_> {
         if let View::Detail(ref mut view) = self.view {
             // Kept so reopening the detail view shows the pane at the size the user left it.
             self.detail_height = view.detail_height();
+            self.detail_message_lines = view.message_lines();
             let commit_list_state = view.take_list_state();
             self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
         }

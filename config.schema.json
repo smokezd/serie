@@ -709,6 +709,9 @@
         "detail_height_decrease": {
           "$ref": "#/definitions/keybindArray"
         },
+        "detail_message_toggle": {
+          "$ref": "#/definitions/keybindArray"
+        },
         "go_to_merge_base": {
           "$ref": "#/definitions/keybindArray"
         },

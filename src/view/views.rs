@@ -11,7 +11,10 @@ use crate::{
         detail::DetailView, help::HelpView, list::ListView, refs::RefsView,
         user_command::UserCommandView,
     },
-    widget::commit_list::{CommitListState, SearchRefreshContext},
+    widget::{
+        commit_detail::MessageLines,
+        commit_list::{CommitListState, SearchRefreshContext},
+    },
 };
 
 #[derive(Debug, Default)]
@@ -106,6 +109,7 @@ impl<'a> View<'a> {
         changes: Vec<FileChange>,
         refs: Vec<Ref>,
         detail_height: u16,
+        message_lines: MessageLines,
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> Self {
@@ -115,6 +119,7 @@ impl<'a> View<'a> {
             changes,
             refs,
             detail_height,
+            message_lines,
             ctx,
             tx,
         )))
@@ -212,6 +217,8 @@ pub struct ListRefreshViewContext {
     /// it in for every other view before the refresh leaves, so a resize survives a refresh taken
     /// from anywhere.
     pub detail_height: Option<u16>,
+    /// Set alongside `detail_height`, and filled in by `App` the same way.
+    pub detail_message_lines: Option<MessageLines>,
 }
 
 impl From<&CommitListState<'_>> for ListRefreshViewContext {
@@ -233,6 +240,7 @@ impl From<&CommitListState<'_>> for ListRefreshViewContext {
             search_context,
             graph_visible,
             detail_height: None,
+            detail_message_lines: None,
         }
     }
 }

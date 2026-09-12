@@ -48,6 +48,11 @@ The size is kept for the rest of the session — closing and reopening the pane,
 all preserve it — while `ui.detail.height` sets where it starts. The commit list always keeps at
 least one row, and the pane never shrinks below one.
 
+A long commit message pushes the changed files off the bottom of the pane, which is usually what
+the pane was opened to show. <kbd>m</kbd> caps the message at 5 lines, then 10, then restores it in
+full, and says which it has moved to. A capped message ends in `… N more lines`, so it is always
+clear that something is hidden and how much. Like the pane size, the setting lasts for the session.
+
 | Key                                  | Description                     | Corresponding keybind           |
 | ------------------------------------ | ------------------------------- | ------------------------------- |
 | <kbd>Esc</kbd> <kbd>Backspace</kbd>  | Close commit details            | `close` `cancel`                |
@@ -58,6 +63,7 @@ least one row, and the pane never shrinks below one.
 | <kbd>J/K</kbd>                       | Select older/newer commit       | `select_down` `select_up`       |
 | <kbd>Alt-Down</kbd> <kbd>Alt-j</kbd> | Select parent commit            | `go_to_parent`                  |
 | <kbd>+/-</kbd>                       | Grow/shrink the detail pane     | `detail_height_increase` `detail_height_decrease` |
+| <kbd>m</kbd>                         | Show 5 / 10 / all message lines | `detail_message_toggle`         |
 | <kbd>R</kbd>                         | Refresh                         | `refresh`                       |
 | <kbd>c/C</kbd>                       | Copy commit short/full hash     | `short_copy` `full_copy`        |
 | <kbd>d</kbd>                         | Toggle custom user command view | `user_command_1`                |
