@@ -33,9 +33,11 @@ impl<'a> RefsView<'a> {
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> RefsView<'a> {
+        // Taken before the state moves into the struct; the refs tree pins HEAD at the top.
+        let ref_list_state = RefListState::new(refs, commit_list_state.head());
         RefsView {
             commit_list_state: Some(commit_list_state),
-            ref_list_state: RefListState::new(refs),
+            ref_list_state,
             ctx,
             tx,
         }
@@ -95,7 +97,6 @@ impl<'a> RefsView<'a> {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         let [list_area, refs_area] = self.split_areas(area);
-
         let commit_list = CommitList::new(self.ctx.clone());
         f.render_stateful_widget(commit_list, list_area, self.as_mut_list_state());
 

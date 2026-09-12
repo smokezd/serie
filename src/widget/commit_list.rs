@@ -339,6 +339,10 @@ impl<'a> CommitListState<'a> {
         TipJump::Selected
     }
 
+    pub fn head(&self) -> &'a Head {
+        self.head
+    }
+
     pub fn graph_visible(&self) -> bool {
         self.graph_visible
     }

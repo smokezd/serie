@@ -164,6 +164,19 @@ impl<'a> App<'a> {
                 CellWidthType::Single => (graph.max_pos_x + 1) as u16 + 1,
             }
         };
+        // `select_ref` resolves every refs-list entry through this map, so registering HEAD here
+        // makes the new node work through the existing path, attached or detached alike.
+        let head_commit_index = match repository.head() {
+            Head::Branch { name } => ref_name_to_commit_index_map.get(name.as_str()).copied(),
+            Head::Detached { target } => {
+                graph.commits.iter().position(|c| &c.commit_hash == target)
+            }
+            Head::None => None,
+        };
+        if let Some(index) = head_commit_index {
+            ref_name_to_commit_index_map.insert("HEAD", index);
+        }
+
         // Tips in revspec order, mapped onto their row so rotation can walk them.
         let tip_indexes: Vec<usize> = revspec_tips
             .iter()

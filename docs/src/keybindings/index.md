@@ -67,6 +67,10 @@ The default key bindings can be overridden.
 | <kbd>R</kbd>                                       | Refresh          | `refresh`                        |
 | <kbd>c</kbd>                                       | Copy ref name    | `short_copy`                     |
 
+`HEAD` is listed first under **Branches**, above the branches themselves, and selects the commit
+you are on. It is listed whether HEAD is attached to a branch or detached; a repository with an
+unborn branch lists nothing, since there is no commit to select.
+
 #### User Command
 
 | Key                                  | Description                 | Corresponding keybind           |

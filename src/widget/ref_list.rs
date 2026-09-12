@@ -8,7 +8,10 @@ use ratatui::{
 };
 use semver::Version;
 
-use crate::{app::AppContext, git::Ref};
+use crate::{
+    app::AppContext,
+    git::{Head, Ref},
+};
 
 const TREE_BRANCH_ROOT_IDENT: &str = "__branches__";
 const TREE_REMOTE_ROOT_IDENT: &str = "__remotes__";
@@ -19,6 +22,9 @@ const TREE_BRANCH_ROOT_TEXT: &str = "Branches";
 const TREE_REMOTE_ROOT_TEXT: &str = "Remotes";
 const TREE_TAG_ROOT_TEXT: &str = "Tags";
 const TREE_STASH_ROOT_TEXT: &str = "Stashes";
+
+/// Both the node text and the identifier `select_ref` resolves, so the two cannot drift apart.
+const TREE_HEAD_IDENT: &str = "HEAD";
 
 #[derive(Debug)]
 pub struct RefListState {
@@ -31,11 +37,11 @@ pub struct RefListState {
 }
 
 impl RefListState {
-    pub fn new(refs: &[&Ref]) -> Self {
+    pub fn new(refs: &[&Ref], head: &Head) -> Self {
         let selected = vec![TREE_BRANCH_ROOT_IDENT.into()];
         let opened = HashSet::from([selected.clone()]);
         let mut state = Self {
-            roots: build_ref_tree_nodes(refs),
+            roots: build_ref_tree_nodes(refs, head),
             visible_rows: Vec::new(),
             selected,
             opened,
@@ -249,7 +255,7 @@ impl StatefulWidget for RefList {
     }
 }
 
-fn build_ref_tree_nodes(refs: &[&Ref]) -> Vec<RefTreeNode> {
+fn build_ref_tree_nodes(refs: &[&Ref], head: &Head) -> Vec<RefTreeNode> {
     let mut branch_refs = Vec::new();
     let mut remote_refs = Vec::new();
     let mut tag_refs = Vec::new();
@@ -273,6 +279,16 @@ fn build_ref_tree_nodes(refs: &[&Ref]) -> Vec<RefTreeNode> {
     sort_branch_tree_nodes(&mut remote_nodes);
     sort_tag_tree_nodes(&mut tag_nodes);
     sort_stash_tree_nodes(&mut stash_nodes);
+
+    // Pinned above the branches rather than sorted among them: it is the one entry that is always
+    // worth a single keystroke, and it is not a branch competing for alphabetical position.
+    // `Head::None` (an unborn branch) names no commit, so it lists nothing.
+    if !matches!(head, Head::None) {
+        branch_nodes.insert(
+            0,
+            RefTreeNode::new(TREE_HEAD_IDENT.into(), TREE_HEAD_IDENT.into(), Vec::new()),
+        );
+    }
 
     vec![
         RefTreeNode::new(
@@ -395,4 +411,61 @@ fn sort_stash_tree_nodes(nodes: &mut [RefTreeNode]) {
 fn parse_semantic_version_tag(tag: &str) -> Option<Version> {
     let tag = tag.trim_start_matches('v');
     Version::parse(tag).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::git::CommitHash;
+
+    fn branch(name: &str) -> Ref {
+        Ref::Branch {
+            name: name.into(),
+            target: CommitHash::from("0000000000000000000000000000000000000001"),
+        }
+    }
+
+    /// The identifiers of the Branches node's children, in render order.
+    fn branch_child_idents(refs: &[Ref], head: &Head) -> Vec<String> {
+        let refs: Vec<&Ref> = refs.iter().collect();
+        let nodes = build_ref_tree_nodes(&refs, head);
+        nodes
+            .iter()
+            .find(|node| node.identifier == TREE_BRANCH_ROOT_IDENT)
+            .expect("branches node")
+            .children
+            .iter()
+            .map(|child| child.identifier.clone())
+            .collect()
+    }
+
+    #[test]
+    fn test_head_is_pinned_above_the_branches() {
+        let refs = [branch("alpha"), branch("zulu")];
+        let head = Head::Branch {
+            name: "zulu".into(),
+        };
+        // Pinned, not sorted: it precedes `alpha` despite sorting after it by name.
+        assert_eq!(
+            branch_child_idents(&refs, &head),
+            vec!["HEAD", "alpha", "zulu"]
+        );
+    }
+
+    #[test]
+    fn test_head_is_listed_when_detached() {
+        let refs = [branch("alpha")];
+        let head = Head::Detached {
+            target: CommitHash::from("0000000000000000000000000000000000000002"),
+        };
+        // Detached HEAD names no branch, but still names where you are.
+        assert_eq!(branch_child_idents(&refs, &head), vec!["HEAD", "alpha"]);
+    }
+
+    #[test]
+    fn test_head_is_omitted_when_there_is_none() {
+        let refs = [branch("alpha")];
+        // An unborn branch names no commit, so there is nothing to jump to.
+        assert_eq!(branch_child_idents(&refs, &Head::None), vec!["alpha"]);
+    }
 }
