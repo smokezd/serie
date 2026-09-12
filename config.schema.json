@@ -446,6 +446,11 @@
           "description": "Color for the marker on the merge base commit, shown when exactly two revisions are given.",
           "default": "white"
         },
+        "list_marker_tip_fg": {
+          "type": "string",
+          "description": "Color for the marker on a revspec tip commit, shown when two or more revisions are given.",
+          "default": "cyan"
+        },
         "list_subject_fg": {
           "type": "string",
           "description": "Color for the commit subject in the commit list.",
@@ -694,6 +699,9 @@
           "$ref": "#/definitions/keybindArray"
         },
         "go_to_merge_base": {
+          "$ref": "#/definitions/keybindArray"
+        },
+        "go_to_next_tip": {
           "$ref": "#/definitions/keybindArray"
         },
         "short_copy": {

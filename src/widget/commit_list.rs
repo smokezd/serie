@@ -34,6 +34,8 @@ pub struct CommitInfo<'a> {
     refs: Vec<&'a Ref>,
     graph_color: Color,
     is_merge_base: bool,
+    /// 1-based position in the revspec when this commit is one of its tips.
+    tip_ordinal: Option<usize>,
     /// The graph row rendered as text with lane colours already resolved, empty unless the text
     /// renderer is in use.
     graph_text: Vec<Option<(char, Color)>>,
@@ -45,6 +47,7 @@ impl<'a> CommitInfo<'a> {
         refs: Vec<&'a Ref>,
         graph_color: Color,
         is_merge_base: bool,
+        tip_ordinal: Option<usize>,
         graph_text: Vec<Option<(char, Color)>>,
     ) -> Self {
         Self {
@@ -52,6 +55,7 @@ impl<'a> CommitInfo<'a> {
             refs,
             graph_color,
             is_merge_base,
+            tip_ordinal,
             graph_text,
         }
     }
@@ -196,6 +200,15 @@ impl SearchMatcher {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TipJump {
+    Selected,
+    /// Fewer than two plain revisions were given, so there are no tips to rotate through.
+    NoTips,
+    /// Tips exist but every one was cut from the rendered commits, e.g. by `--max-count`.
+    OutsideRenderedCommits,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MergeBaseJump {
     Selected,
     /// The revspec did not name exactly two revisions, so there is no base to speak of.
@@ -223,6 +236,8 @@ pub struct CommitListState<'a> {
     text_graph: bool,
     head: &'a Head,
     merge_base: Option<&'a CommitHash>,
+    /// Indexes into `commits` of the revspec tips, in revspec order.
+    tip_indexes: Vec<usize>,
 
     ref_name_to_commit_index_map: FxHashMap<&'a str, usize>,
 
@@ -247,6 +262,7 @@ impl<'a> CommitListState<'a> {
         text_graph: bool,
         head: &'a Head,
         merge_base: Option<&'a CommitHash>,
+        tip_indexes: Vec<usize>,
         ref_name_to_commit_index_map: FxHashMap<&'a str, usize>,
         search_options: SearchOptions,
     ) -> CommitListState<'a> {
@@ -262,6 +278,7 @@ impl<'a> CommitListState<'a> {
             text_graph,
             head,
             merge_base,
+            tip_indexes,
             ref_name_to_commit_index_map,
             search_state: SearchState::Inactive,
             search_options,
@@ -291,6 +308,35 @@ impl<'a> CommitListState<'a> {
         let merge_base = merge_base.clone();
         self.select_commit_hash(&merge_base);
         MergeBaseJump::Selected
+    }
+
+    /// Selects the next revspec tip below the current selection, wrapping at the bottom, the way
+    /// `go_to_next` walks search matches.
+    pub fn select_next_tip(&mut self) -> TipJump {
+        if self.tip_indexes.is_empty() {
+            return TipJump::NoTips;
+        }
+        let mut rendered: Vec<usize> = self
+            .tip_indexes
+            .iter()
+            .copied()
+            .filter(|i| *i < self.commits.len())
+            .collect();
+        if rendered.is_empty() {
+            return TipJump::OutsideRenderedCommits;
+        }
+        rendered.sort_unstable();
+        rendered.dedup();
+
+        let current = self.offset + self.selected;
+        let target = rendered
+            .iter()
+            .copied()
+            .find(|i| *i > current)
+            .unwrap_or(rendered[0]);
+        let hash = self.commits[target].commit.commit_hash.clone();
+        self.select_commit_hash(&hash);
+        TipJump::Selected
     }
 
     pub fn graph_visible(&self) -> bool {
@@ -904,8 +950,17 @@ impl CommitList<'_> {
         let items: Vec<ListItem> = self
             .rendering_commit_info_iter(state)
             .map(|(_, commit_info)| {
+                // The merge base outranks a tip: it is the rarer fact, and the tip stays
+                // reachable by rotation.
                 if commit_info.is_merge_base {
                     ListItem::new("◆".fg(self.ctx.color_theme.list_marker_base_fg).bold())
+                } else if let Some(ordinal) = commit_info.tip_ordinal {
+                    let symbol = match char::from_digit(ordinal as u32, 10) {
+                        Some(digit) => digit.to_string(),
+                        // More tips than the one cell can name; they still rotate.
+                        None => "▶".to_string(),
+                    };
+                    ListItem::new(symbol.fg(self.ctx.color_theme.list_marker_tip_fg).bold())
                 } else {
                     ListItem::new("│".fg(commit_info.graph_color))
                 }
@@ -1307,7 +1362,7 @@ mod tests {
         subjects: &[&str],
         f: impl FnOnce(&mut CommitListState<'_>) -> R,
     ) -> R {
-        with_full_commit_list_state(subjects, 0, true, true, None, f)
+        with_full_commit_list_state(subjects, 0, true, true, None, Vec::new(), f)
     }
 
     fn with_graph_commit_list_state<R>(
@@ -1323,6 +1378,7 @@ mod tests {
             graph_visible,
             graph_toggleable,
             None,
+            Vec::new(),
             f,
         )
     }
@@ -1335,6 +1391,7 @@ mod tests {
         graph_visible: bool,
         graph_toggleable: bool,
         merge_base: Option<CommitHash>,
+        tip_indexes: Vec<usize>,
         f: impl FnOnce(&mut CommitListState<'_>) -> R,
     ) -> R {
         let commits: Vec<Commit> = subjects
@@ -1360,6 +1417,7 @@ mod tests {
             Head::None,
             commit_hashes,
             merge_base,
+            Vec::new(),
         );
         let graph = calc_graph(&repository);
         let graph_color_set = GraphColorSet::new(&GraphColorConfig::default());
@@ -1381,6 +1439,7 @@ mod tests {
                     repository.refs(&commit.commit_hash),
                     Color::Reset,
                     is_merge_base,
+                    None,
                     Vec::new(),
                 )
             })
@@ -1394,6 +1453,7 @@ mod tests {
             false,
             repository.head(),
             repository.merge_base(),
+            tip_indexes,
             FxHashMap::default(),
             SearchOptions::default(),
         );
@@ -1751,24 +1811,102 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
+    fn with_tips<R>(
+        subjects: &[&str],
+        tips: Vec<usize>,
+        f: impl FnOnce(&mut CommitListState<'_>) -> R,
+    ) -> R {
+        with_full_commit_list_state(subjects, 0, true, true, None, tips, f)
+    }
+
     #[test]
-    fn test_merge_base_jump_selects_the_base_commit() {
-        let subjects = &["a", "b", "c", "d"];
-        with_full_commit_list_state(subjects, 0, true, true, Some(test_hash(2)), |state| {
-            assert_eq!(state.selected_commit_hash(), &test_hash(0));
-            assert_eq!(state.select_merge_base(), MergeBaseJump::Selected);
+    fn test_tip_rotation_walks_downward_and_wraps() {
+        with_tips(&["a", "b", "c", "d", "e"], vec![1, 3], |state| {
+            // Starts on row 0, so the first press lands on the tip below it.
+            assert_eq!(state.select_next_tip(), TipJump::Selected);
+            assert_eq!(state.selected_commit_hash(), &test_hash(1));
+
+            assert_eq!(state.select_next_tip(), TipJump::Selected);
+            assert_eq!(state.selected_commit_hash(), &test_hash(3));
+
+            // Past the last tip it wraps to the first rather than stopping.
+            assert_eq!(state.select_next_tip(), TipJump::Selected);
+            assert_eq!(state.selected_commit_hash(), &test_hash(1));
+        });
+    }
+
+    #[test]
+    fn test_tip_rotation_is_relative_to_the_current_selection() {
+        with_tips(&["a", "b", "c", "d", "e"], vec![1, 3], |state| {
+            // Scrolling past both tips means the next press wraps to the top one.
+            state.select_commit_hash(&test_hash(4));
+            assert_eq!(state.select_next_tip(), TipJump::Selected);
+            assert_eq!(state.selected_commit_hash(), &test_hash(1));
+        });
+    }
+
+    #[test]
+    fn test_tip_rotation_visits_tips_in_row_order_not_revspec_order() {
+        // Revspec order decides the ordinal shown in the marker column; rotation follows the
+        // list, so walking down never jumps backwards.
+        with_tips(&["a", "b", "c"], vec![2, 0], |state| {
+            state.select_commit_hash(&test_hash(0));
+            assert_eq!(state.select_next_tip(), TipJump::Selected);
             assert_eq!(state.selected_commit_hash(), &test_hash(2));
         });
     }
 
     #[test]
+    fn test_tip_rotation_without_tips_reports_it() {
+        with_tips(&["a", "b"], Vec::new(), |state| {
+            assert_eq!(state.select_next_tip(), TipJump::NoTips);
+            assert_eq!(state.selected_commit_hash(), &test_hash(0));
+        });
+    }
+
+    #[test]
+    fn test_tip_rotation_reports_tips_outside_the_rendered_commits() {
+        // `--max-count` can cut every tip off; the indexes then point past the list.
+        with_tips(&["a", "b"], vec![7, 9], |state| {
+            assert_eq!(state.select_next_tip(), TipJump::OutsideRenderedCommits);
+            assert_eq!(state.selected_commit_hash(), &test_hash(0));
+        });
+    }
+
+    #[test]
+    fn test_merge_base_jump_selects_the_base_commit() {
+        let subjects = &["a", "b", "c", "d"];
+        with_full_commit_list_state(
+            subjects,
+            0,
+            true,
+            true,
+            Some(test_hash(2)),
+            Vec::new(),
+            |state| {
+                assert_eq!(state.selected_commit_hash(), &test_hash(0));
+                assert_eq!(state.select_merge_base(), MergeBaseJump::Selected);
+                assert_eq!(state.selected_commit_hash(), &test_hash(2));
+            },
+        );
+    }
+
+    #[test]
     fn test_merge_base_jump_is_idempotent() {
         let subjects = &["a", "b", "c"];
-        with_full_commit_list_state(subjects, 0, true, true, Some(test_hash(1)), |state| {
-            assert_eq!(state.select_merge_base(), MergeBaseJump::Selected);
-            assert_eq!(state.select_merge_base(), MergeBaseJump::Selected);
-            assert_eq!(state.selected_commit_hash(), &test_hash(1));
-        });
+        with_full_commit_list_state(
+            subjects,
+            0,
+            true,
+            true,
+            Some(test_hash(1)),
+            Vec::new(),
+            |state| {
+                assert_eq!(state.select_merge_base(), MergeBaseJump::Selected);
+                assert_eq!(state.select_merge_base(), MergeBaseJump::Selected);
+                assert_eq!(state.selected_commit_hash(), &test_hash(1));
+            },
+        );
     }
 
     #[test]
@@ -1783,13 +1921,21 @@ mod tests {
     fn test_merge_base_jump_reports_a_base_outside_the_rendered_commits() {
         // A base that `--max-count` cut off: a real hash that no rendered commit carries.
         let outside = CommitHash::from("00000000000000000000000000000000000000ff");
-        with_full_commit_list_state(&["a", "b"], 0, true, true, Some(outside), |state| {
-            assert_eq!(
-                state.select_merge_base(),
-                MergeBaseJump::OutsideRenderedCommits
-            );
-            assert_eq!(state.selected_commit_hash(), &test_hash(0));
-        });
+        with_full_commit_list_state(
+            &["a", "b"],
+            0,
+            true,
+            true,
+            Some(outside),
+            Vec::new(),
+            |state| {
+                assert_eq!(
+                    state.select_merge_base(),
+                    MergeBaseJump::OutsideRenderedCommits
+                );
+                assert_eq!(state.selected_commit_hash(), &test_hash(0));
+            },
+        );
     }
 
     #[test]

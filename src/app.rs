@@ -21,7 +21,7 @@ use crate::{
     external::{
         copy_to_clipboard, exec_user_command, exec_user_command_suspend, ExternalCommandParameters,
     },
-    git::{Commit, FileChange, Head, Ref, Repository},
+    git::{Commit, CommitHash, FileChange, Head, Ref, Repository},
     graph::{
         build_graph_row_text, CellWidthType, Graph, GraphImageManager, GraphRenderer,
         CELLS_PER_LANE,
@@ -111,6 +111,15 @@ impl<'a> App<'a> {
         refresh_view_context: Option<RefreshViewContext>,
     ) -> Self {
         let merge_base = repository.merge_base();
+        let revspec_tips = repository.revspec_tips();
+        // The ordinal is the first revspec position resolving to the commit, so two revisions
+        // naming the same commit mark it once, with the earlier number.
+        let tip_ordinal_of = |hash: &CommitHash| {
+            revspec_tips
+                .iter()
+                .position(|tip| tip == hash)
+                .map(|i| i + 1)
+        };
         let mut ref_name_to_commit_index_map = FxHashMap::default();
         let commits = graph
             .commits
@@ -133,7 +142,15 @@ impl<'a> App<'a> {
                         .collect(),
                     None => Vec::new(),
                 };
-                CommitInfo::new(commit, refs, graph_color, is_merge_base, graph_text)
+                let tip_ordinal = tip_ordinal_of(&commit.commit_hash);
+                CommitInfo::new(
+                    commit,
+                    refs,
+                    graph_color,
+                    is_merge_base,
+                    tip_ordinal,
+                    graph_text,
+                )
             })
             .collect();
         // The whole column, padding included. The image renderer wants a trailing pad column; a
@@ -147,6 +164,11 @@ impl<'a> App<'a> {
                 CellWidthType::Single => (graph.max_pos_x + 1) as u16 + 1,
             }
         };
+        // Tips in revspec order, mapped onto their row so rotation can walk them.
+        let tip_indexes: Vec<usize> = revspec_tips
+            .iter()
+            .filter_map(|tip| graph.commits.iter().position(|c| &c.commit_hash == tip))
+            .collect();
         let head = repository.head();
         let mut commit_list_state = CommitListState::new(
             commits,
@@ -157,6 +179,7 @@ impl<'a> App<'a> {
             text_graph,
             head,
             merge_base,
+            tip_indexes,
             ref_name_to_commit_index_map,
             SearchOptions {
                 target: ctx.core_config.search.target,

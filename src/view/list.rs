@@ -9,7 +9,7 @@ use crate::{
     git::CommitHash,
     view::{ListRefreshViewContext, RefreshViewContext},
     widget::commit_list::{
-        CommitList, CommitListState, GraphToggleResult, MergeBaseJump, SearchState,
+        CommitList, CommitListState, GraphToggleResult, MergeBaseJump, SearchState, TipJump,
     },
 };
 
@@ -158,6 +158,9 @@ impl<'a> ListView<'a> {
                 UserEvent::GoToMergeBase => {
                     self.go_to_merge_base();
                 }
+                UserEvent::GoToNextTip => {
+                    self.go_to_next_tip();
+                }
                 UserEvent::UserCommand(n) => {
                     self.tx.send(AppEvent::OpenUserCommand(n));
                 }
@@ -230,6 +233,23 @@ impl<'a> ListView<'a> {
 
     pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
         self.as_list_state().graph_image_ids_sorted()
+    }
+
+    fn go_to_next_tip(&mut self) {
+        match self.as_mut_list_state().select_next_tip() {
+            // Landing on the next tip is visible on screen, so it needs no announcement.
+            TipJump::Selected => {}
+            TipJump::NoTips => {
+                self.tx.send(AppEvent::UpdateStatusTransient(
+                    "Revspec tips need two or more revisions".into(),
+                ));
+            }
+            TipJump::OutsideRenderedCommits => {
+                self.tx.send(AppEvent::NotifyError(
+                    "No revspec tip is among the rendered commits".into(),
+                ));
+            }
+        }
     }
 
     fn go_to_merge_base(&mut self) {

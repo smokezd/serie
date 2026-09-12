@@ -116,6 +116,9 @@ pub struct Repository {
     commit_hashes: Vec<CommitHash>,
     // `Some` only when the revspec named exactly two revisions; see `two_revisions`
     merge_base: Option<CommitHash>,
+    // The commit each plain revision in the revspec resolves to, in the order given. Empty
+    // unless the revspec named two or more of them; see `plain_revisions`.
+    revspec_tips: Vec<CommitHash>,
 }
 
 impl Repository {
@@ -160,6 +163,7 @@ impl Repository {
         }
 
         let merge_base = two_revisions(revspec).and_then(|(a, b)| load_merge_base(path, a, b));
+        let revspec_tips = load_revspec_tips(path, revspec);
 
         Ok(Self::new(
             path.to_path_buf(),
@@ -170,6 +174,7 @@ impl Repository {
             head,
             commit_hashes,
             merge_base,
+            revspec_tips,
         ))
     }
 
@@ -182,6 +187,7 @@ impl Repository {
         head: Head,
         commit_hashes: Vec<CommitHash>,
         merge_base: Option<CommitHash>,
+        revspec_tips: Vec<CommitHash>,
     ) -> Self {
         Self {
             path,
@@ -192,6 +198,7 @@ impl Repository {
             head,
             commit_hashes,
             merge_base,
+            revspec_tips,
         }
     }
 
@@ -235,6 +242,12 @@ impl Repository {
         &self.head
     }
 
+    /// The commit each plain revision in the revspec resolves to, in the order given. Empty
+    /// unless the revspec named two or more; a commit here is not necessarily rendered.
+    pub fn revspec_tips(&self) -> &[CommitHash] {
+        &self.revspec_tips
+    }
+
     /// The common ancestor of the two revisions the revspec named, if it named exactly two.
     /// The commit is not necessarily rendered: `--max-count` can cut it off.
     pub fn merge_base(&self) -> Option<&CommitHash> {
@@ -271,6 +284,52 @@ fn two_revisions(revspec: &[String]) -> Option<(&str, &str)> {
         }
     }
     Some((a, b))
+}
+
+/// The revspec elements that name a single commit, in order. A range, an exclusion or a `git log`
+/// flag names no single commit, so each is skipped rather than disqualifying the whole revspec.
+fn plain_revisions(revspec: &[String]) -> Vec<&str> {
+    revspec
+        .iter()
+        .map(String::as_str)
+        .filter(|rev| !(rev.starts_with('-') || rev.starts_with('^') || rev.contains("..")))
+        .collect()
+}
+
+/// Resolves the plain revisions to commits, once, in one `git rev-parse` call. Returns empty
+/// unless at least two revisions resolve, since a single tip is almost always the top row.
+fn load_revspec_tips(path: &Path, revspec: &[String]) -> Vec<CommitHash> {
+    let revisions = plain_revisions(revspec);
+    if revisions.len() < 2 {
+        return Vec::new();
+    }
+    let output = Command::new("git")
+        .arg("rev-parse")
+        .args(&revisions)
+        .current_dir(path)
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let Ok(stdout) = String::from_utf8(output.stdout) else {
+        return Vec::new();
+    };
+    let tips: Vec<CommitHash> = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(CommitHash::from)
+        .collect();
+    // `rev-parse` prints one line per argument; anything else means it did not resolve what we
+    // asked, so fall back to marking nothing rather than mislabelling the ordinals.
+    if tips.len() == revisions.len() {
+        tips
+    } else {
+        Vec::new()
+    }
 }
 
 fn load_merge_base(path: &Path, a: &str, b: &str) -> Option<CommitHash> {
@@ -811,6 +870,24 @@ mod tests {
         assert_eq!(two_revisions(&revspec(&[])), None);
         assert_eq!(two_revisions(&revspec(&["master"])), None);
         assert_eq!(two_revisions(&revspec(&["a", "b", "c"])), None);
+    }
+
+    #[test]
+    fn test_plain_revisions_keeps_only_what_names_a_single_commit() {
+        assert_eq!(
+            plain_revisions(&revspec(&["master", "topic"])),
+            vec!["master", "topic"]
+        );
+        // A flag or a range is skipped rather than disqualifying the rest.
+        assert_eq!(
+            plain_revisions(&revspec(&["master", "--all", "topic"])),
+            vec!["master", "topic"]
+        );
+        assert_eq!(
+            plain_revisions(&revspec(&["a..b", "^c", "topic"])),
+            vec!["topic"]
+        );
+        assert!(plain_revisions(&revspec(&["--all"])).is_empty());
     }
 
     #[test]

@@ -34,6 +34,8 @@ pub struct ColorTheme {
     // so a neutral is the only hue that cannot collide with a lane.
     #[default(RatatuiColor::White)]
     pub list_marker_base_fg: RatatuiColor,
+    #[default(RatatuiColor::Cyan)]
+    pub list_marker_tip_fg: RatatuiColor,
     #[default(RatatuiColor::Reset)]
     pub list_subject_fg: RatatuiColor,
     #[default(RatatuiColor::Cyan)]

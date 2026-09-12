@@ -146,6 +146,18 @@ When exactly two revisions are given, their common ancestor is marked in the com
 $ serie master topic
 ```
 
+When two or more revisions are given, each one's tip is marked in the marker column with its
+position in the revspec (`1`, `2`, `3`, ...), and the `go_to_next_tip` keybinding (<kbd>t</kbd> by
+default) rotates through them, walking down the list and wrapping at the bottom. A commit that is
+both a tip and the merge base shows the merge base marker, and is still reachable by rotation.
+
+```
+$ serie master topic feature
+```
+
+Ranges, exclusions and flags contribute no tip, but do not stop the other revisions from being
+marked: `serie master topic --all` still marks `master` and `topic`.
+
 The base is computed with `git merge-base`, so it is recomputed on refresh as the branches move.
 Ranges (`master..topic`), exclusions (`^master`) and `git log` flags opt out, since none of them
 names exactly two commits.
