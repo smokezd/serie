@@ -158,10 +158,19 @@ $ serie master topic feature
 Ranges, exclusions and flags contribute no tip, but do not stop the other revisions from being
 marked: `serie master topic --all` still marks `master` and `topic`.
 
-The marker column holds one cell, so when a commit is more than one of these at once the markers
-are ranked: the merge base (`◆`) outranks a revspec tip (`1`, `2`, ...), and both outrank HEAD
-(`@`), which already shows as `(HEAD -> ...)` beside the subject. HEAD is marked whether it is
-attached to a branch or detached.
+The marker column is two cells wide. The first carries what the revspec asked about — the merge
+base (`◆`) or a tip's position (`1`, `2`, ...) — and the second carries HEAD (`@`), falling back to
+the lane tick. A commit that is both a tip and HEAD therefore shows both:
+
+```
+1@  the revision you passed, and where you are
+ @  where you are
+2│  another revision you passed
+◆│  the merge base
+```
+
+The merge base and a tip share the first cell, and the base wins; the ordinal stays reachable with
+`go_to_next_tip`. HEAD is marked whether it is attached to a branch or detached.
 
 The base is computed with `git merge-base`, so it is recomputed on refresh as the branches move.
 Ranges (`master..topic`), exclusions (`^master`) and `git log` flags opt out, since none of them

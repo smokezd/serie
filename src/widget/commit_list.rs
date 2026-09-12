@@ -957,8 +957,8 @@ impl CommitList<'_> {
         let items: Vec<ListItem> = self
             .rendering_commit_info_iter(state)
             .map(|(_, commit_info)| {
-                let (symbol, color) = marker_symbol(commit_info, &self.ctx.color_theme);
-                ListItem::new(symbol.fg(color).bold())
+                let cells = marker_cells(commit_info, &self.ctx.color_theme);
+                ListItem::new(Line::from(vec![cells[0].to_span(), cells[1].to_span()]))
             })
             .collect();
         Widget::render(List::new(items), area, buf)
@@ -1146,26 +1146,78 @@ impl CommitList<'_> {
     }
 }
 
-/// The marker column holds one cell, so the three facts that can land on a row are ranked.
+/// The two cells of the marker column, left then right.
 ///
-/// A merge base outranks a tip because it is the rarer fact, and both outrank HEAD because HEAD
-/// already shows as `(HEAD -> ...)` in the subject while they have no other indicator.
-fn marker_symbol(commit_info: &CommitInfo, color_theme: &ColorTheme) -> (String, Color) {
-    if commit_info.is_merge_base {
-        return ("\u{25c6}".into(), color_theme.list_marker_base_fg); // ◆
+/// Slot 1 carries what the revspec asked about: the merge base, or a tip's position. Slot 2
+/// carries HEAD, falling back to the lane tick that divides the graph from the subject. Splitting
+/// them this way means being sat on one of the revisions you passed shows both facts at once,
+/// which is the normal case rather than the exotic one.
+///
+/// The merge base and a tip still share slot 1, and the base wins: it is the rarer pairing, and
+/// the ordinal stays recoverable by rotating with `go_to_next_tip`.
+fn marker_cells(commit_info: &CommitInfo, color_theme: &ColorTheme) -> [MarkerCell; 2] {
+    let revspec_cell = if commit_info.is_merge_base {
+        MarkerCell::marker("\u{25c6}", color_theme.list_marker_base_fg) // ◆
+    } else if let Some(ordinal) = commit_info.tip_ordinal {
+        match char::from_digit(ordinal as u32, 10) {
+            Some(digit) => MarkerCell::marker(&digit.to_string(), color_theme.list_marker_tip_fg),
+            // More tips than one cell can name; they still rotate.
+            None => MarkerCell::marker("\u{25b6}", color_theme.list_marker_tip_fg), // ▶
+        }
+    } else {
+        MarkerCell::blank()
+    };
+
+    let head_cell = if commit_info.is_head {
+        MarkerCell::marker("@", color_theme.list_marker_head_fg)
+    } else {
+        MarkerCell::tick(commit_info.graph_color)
+    };
+
+    [revspec_cell, head_cell]
+}
+
+/// A marker column cell. Markers are bold so they stand out from the lane tick, which is not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MarkerCell {
+    symbol: String,
+    color: Color,
+    bold: bool,
+}
+
+impl MarkerCell {
+    fn marker(symbol: &str, color: Color) -> Self {
+        Self {
+            symbol: symbol.into(),
+            color,
+            bold: true,
+        }
     }
-    if let Some(ordinal) = commit_info.tip_ordinal {
-        let symbol = match char::from_digit(ordinal as u32, 10) {
-            Some(digit) => digit.to_string(),
-            // More tips than the one cell can name; they still rotate.
-            None => "\u{25b6}".into(), // ▶
-        };
-        return (symbol, color_theme.list_marker_tip_fg);
+
+    fn tick(color: Color) -> Self {
+        Self {
+            symbol: "\u{2502}".into(), // │
+            color,
+            bold: false,
+        }
     }
-    if commit_info.is_head {
-        return ("@".into(), color_theme.list_marker_head_fg);
+
+    fn blank() -> Self {
+        Self {
+            symbol: " ".into(),
+            color: Color::Reset,
+            bold: false,
+        }
     }
-    ("\u{2502}".into(), commit_info.graph_color) // │
+
+    fn to_span(&self) -> Span<'static> {
+        let span = Span::raw(self.symbol.clone()).fg(self.color);
+        if self.bold {
+            span.bold()
+        } else {
+            span
+        }
+    }
 }
 
 fn refs_spans<'a>(
@@ -1299,7 +1351,8 @@ fn calc_cell_widths(
                 graph_cell_width = graph_width;
             }
             UserListColumnType::Marker => {
-                marker_cell_width = 1;
+                // Two cells: one for what the revspec asked about, one for HEAD or the lane tick.
+                marker_cell_width = 2;
             }
             UserListColumnType::Name => {
                 name_cell_width = name_width + pad;
@@ -1820,7 +1873,7 @@ mod tests {
 
         let expected = vec![
             Constraint::Length(6),  // Graph
-            Constraint::Length(1),  // Marker
+            Constraint::Length(2),  // Marker
             Constraint::Min(0),     // Subject
             Constraint::Length(12), // Name (10 + 2 pad)
             Constraint::Length(9),  // Hash (7 + 2 pad)
@@ -1837,6 +1890,7 @@ mod tests {
         with_full_commit_list_state(subjects, 0, true, true, None, tips, f)
     }
 
+    /// The two marker cells as a string, so a test reads like the column looks.
     fn marker_of(is_merge_base: bool, tip: Option<usize>, is_head: bool) -> String {
         let commit = Commit::default();
         let info = CommitInfo::new(
@@ -1848,22 +1902,55 @@ mod tests {
             tip,
             Vec::new(),
         );
-        marker_symbol(&info, &ColorTheme::default()).0
+        marker_cells(&info, &ColorTheme::default())
+            .iter()
+            .map(|cell| cell.symbol.clone())
+            .collect()
     }
 
     #[test]
-    fn test_marker_ranks_merge_base_over_tip_over_head() {
-        // A row can be all three at once, which happens whenever you sit on one of the revisions.
-        assert_eq!(marker_of(true, Some(1), true), "\u{25c6}");
-        assert_eq!(marker_of(false, Some(1), true), "1");
-        assert_eq!(marker_of(false, None, true), "@");
-        assert_eq!(marker_of(false, None, false), "\u{2502}");
+    fn test_marker_shows_a_tip_and_head_at_the_same_time() {
+        // The point of the second cell: sitting on a revision you passed shows both facts.
+        assert_eq!(marker_of(false, Some(1), true), "1@");
+    }
+
+    #[test]
+    fn test_marker_slots_are_independent() {
+        assert_eq!(marker_of(false, None, false), " \u{2502}"); // blank, then the lane tick
+        assert_eq!(marker_of(false, Some(2), false), "2\u{2502}");
+        assert_eq!(marker_of(false, None, true), " @");
+        assert_eq!(marker_of(true, None, false), "\u{25c6}\u{2502}");
+        assert_eq!(marker_of(true, None, true), "\u{25c6}@");
+    }
+
+    #[test]
+    fn test_merge_base_still_outranks_a_tip_in_the_first_slot() {
+        // Two facts, one slot: the rarer one wins and the ordinal stays reachable by rotation.
+        assert_eq!(marker_of(true, Some(2), false), "\u{25c6}\u{2502}");
+        assert_eq!(marker_of(true, Some(2), true), "\u{25c6}@");
     }
 
     #[test]
     fn test_marker_falls_back_when_there_are_more_tips_than_digits() {
-        assert_eq!(marker_of(false, Some(9), false), "9");
-        assert_eq!(marker_of(false, Some(10), false), "\u{25b6}");
+        assert_eq!(marker_of(false, Some(9), false), "9\u{2502}");
+        assert_eq!(marker_of(false, Some(10), false), "\u{25b6}\u{2502}");
+    }
+
+    #[test]
+    fn test_only_markers_are_bold_not_the_lane_tick() {
+        let commit = Commit::default();
+        let info = CommitInfo::new(
+            &commit,
+            Vec::new(),
+            Color::Reset,
+            false,
+            false,
+            Some(1),
+            Vec::new(),
+        );
+        let cells = marker_cells(&info, &ColorTheme::default());
+        assert!(cells[0].bold, "a tip marker should stand out");
+        assert!(!cells[1].bold, "the lane tick is a divider, not a marker");
     }
 
     #[test]
@@ -2081,7 +2168,7 @@ mod tests {
 
         let expected = vec![
             Constraint::Length(0),  // Graph
-            Constraint::Length(1),  // Marker
+            Constraint::Length(2),  // Marker
             Constraint::Min(0),     // Subject
             Constraint::Length(12), // Name (10 + 2 pad)
             Constraint::Length(9),  // Hash (7 + 2 pad)
@@ -2119,7 +2206,7 @@ mod tests {
             visible,
             vec![
                 Constraint::Length(6),  // Graph
-                Constraint::Length(1),  // Marker
+                Constraint::Length(2),  // Marker
                 Constraint::Min(0),     // Subject
                 Constraint::Length(0),  // Name dropped to make room for the graph
                 Constraint::Length(9),  // Hash
@@ -2139,7 +2226,7 @@ mod tests {
             hidden,
             vec![
                 Constraint::Length(0),  // Graph
-                Constraint::Length(1),  // Marker
+                Constraint::Length(2),  // Marker
                 Constraint::Min(0),     // Subject
                 Constraint::Length(12), // Name kept
                 Constraint::Length(9),  // Hash
@@ -2173,11 +2260,11 @@ mod tests {
             &columns,
         );
 
-        // Graph + Marker + Subject + Hash = 6 + 1 + 20 + 9 = 36 > 30
+        // Graph + Marker + Subject + Hash = 6 + 2 + 20 + 9 = 37 > 30
         // => Name, Date, and Hash are removed
         let expected = vec![
             Constraint::Length(6), // Graph
-            Constraint::Length(1), // Marker
+            Constraint::Length(2), // Marker
             Constraint::Min(0),    // Subject
             Constraint::Length(0), // Name removed
             Constraint::Length(0), // Hash removed
@@ -2211,12 +2298,12 @@ mod tests {
             &columns,
         );
 
-        // Graph + Marker + Subject + Hash = 6 + 1 + 20 + 9 = 36
-        // Graph + Marker + Subject + Date + Hash = 6 + 1 + 20 + 17 + 9 = 53 > 40
+        // Graph + Marker + Subject + Hash = 6 + 2 + 20 + 9 = 37
+        // Graph + Marker + Subject + Date + Hash = 6 + 2 + 20 + 17 + 9 = 54 > 40
         // => Name and Date are removed
         let expected = vec![
             Constraint::Length(6), // Graph
-            Constraint::Length(1), // Marker
+            Constraint::Length(2), // Marker
             Constraint::Min(0),    // Subject
             Constraint::Length(0), // Name removed
             Constraint::Length(9), // Hash (7 + 2 pad)
@@ -2250,12 +2337,12 @@ mod tests {
             &columns,
         );
 
-        // Graph + Marker + Subject + Date + Hash = 6 + 1 + 20 + 17 + 9 = 53 <= 60
-        // Graph + Marker + Subject + Name + Date + Hash = 6 + 1 + 20 + 12 + 17 + 9 = 65 > 60
+        // Graph + Marker + Subject + Date + Hash = 6 + 2 + 20 + 17 + 9 = 54 <= 60
+        // Graph + Marker + Subject + Name + Date + Hash = 6 + 2 + 20 + 12 + 17 + 9 = 66 > 60
         // => Name is removed
         let expected = vec![
             Constraint::Length(6),  // Graph
-            Constraint::Length(1),  // Marker
+            Constraint::Length(2),  // Marker
             Constraint::Min(0),     // Subject
             Constraint::Length(0),  // Name removed
             Constraint::Length(9),  // Hash (7 + 2 pad)
