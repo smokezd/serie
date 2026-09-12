@@ -36,6 +36,8 @@ pub struct ColorTheme {
     pub list_marker_base_fg: RatatuiColor,
     #[default(RatatuiColor::Cyan)]
     pub list_marker_tip_fg: RatatuiColor,
+    #[default(RatatuiColor::Yellow)]
+    pub list_marker_head_fg: RatatuiColor,
     #[default(RatatuiColor::Reset)]
     pub list_subject_fg: RatatuiColor,
     #[default(RatatuiColor::Cyan)]

@@ -451,6 +451,11 @@
           "description": "Color for the marker on a revspec tip commit, shown when two or more revisions are given.",
           "default": "cyan"
         },
+        "list_marker_head_fg": {
+          "type": "string",
+          "description": "Color for the marker on the HEAD commit in the commit list.",
+          "default": "yellow"
+        },
         "list_subject_fg": {
           "type": "string",
           "description": "Color for the commit subject in the commit list.",

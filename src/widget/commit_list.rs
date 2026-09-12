@@ -34,6 +34,7 @@ pub struct CommitInfo<'a> {
     refs: Vec<&'a Ref>,
     graph_color: Color,
     is_merge_base: bool,
+    is_head: bool,
     /// 1-based position in the revspec when this commit is one of its tips.
     tip_ordinal: Option<usize>,
     /// The graph row rendered as text with lane colours already resolved, empty unless the text
@@ -47,6 +48,7 @@ impl<'a> CommitInfo<'a> {
         refs: Vec<&'a Ref>,
         graph_color: Color,
         is_merge_base: bool,
+        is_head: bool,
         tip_ordinal: Option<usize>,
         graph_text: Vec<Option<(char, Color)>>,
     ) -> Self {
@@ -55,6 +57,7 @@ impl<'a> CommitInfo<'a> {
             refs,
             graph_color,
             is_merge_base,
+            is_head,
             tip_ordinal,
             graph_text,
         }
@@ -954,20 +957,8 @@ impl CommitList<'_> {
         let items: Vec<ListItem> = self
             .rendering_commit_info_iter(state)
             .map(|(_, commit_info)| {
-                // The merge base outranks a tip: it is the rarer fact, and the tip stays
-                // reachable by rotation.
-                if commit_info.is_merge_base {
-                    ListItem::new("◆".fg(self.ctx.color_theme.list_marker_base_fg).bold())
-                } else if let Some(ordinal) = commit_info.tip_ordinal {
-                    let symbol = match char::from_digit(ordinal as u32, 10) {
-                        Some(digit) => digit.to_string(),
-                        // More tips than the one cell can name; they still rotate.
-                        None => "▶".to_string(),
-                    };
-                    ListItem::new(symbol.fg(self.ctx.color_theme.list_marker_tip_fg).bold())
-                } else {
-                    ListItem::new("│".fg(commit_info.graph_color))
-                }
+                let (symbol, color) = marker_symbol(commit_info, &self.ctx.color_theme);
+                ListItem::new(symbol.fg(color).bold())
             })
             .collect();
         Widget::render(List::new(items), area, buf)
@@ -1153,6 +1144,28 @@ impl CommitList<'_> {
         }
         ListItem::new(line)
     }
+}
+
+/// The marker column holds one cell, so the three facts that can land on a row are ranked.
+///
+/// A merge base outranks a tip because it is the rarer fact, and both outrank HEAD because HEAD
+/// already shows as `(HEAD -> ...)` in the subject while they have no other indicator.
+fn marker_symbol(commit_info: &CommitInfo, color_theme: &ColorTheme) -> (String, Color) {
+    if commit_info.is_merge_base {
+        return ("\u{25c6}".into(), color_theme.list_marker_base_fg); // ◆
+    }
+    if let Some(ordinal) = commit_info.tip_ordinal {
+        let symbol = match char::from_digit(ordinal as u32, 10) {
+            Some(digit) => digit.to_string(),
+            // More tips than the one cell can name; they still rotate.
+            None => "\u{25b6}".into(), // ▶
+        };
+        return (symbol, color_theme.list_marker_tip_fg);
+    }
+    if commit_info.is_head {
+        return ("@".into(), color_theme.list_marker_head_fg);
+    }
+    ("\u{2502}".into(), commit_info.graph_color) // │
 }
 
 fn refs_spans<'a>(
@@ -1443,6 +1456,7 @@ mod tests {
                     repository.refs(&commit.commit_hash),
                     Color::Reset,
                     is_merge_base,
+                    false,
                     None,
                     Vec::new(),
                 )
@@ -1821,6 +1835,35 @@ mod tests {
         f: impl FnOnce(&mut CommitListState<'_>) -> R,
     ) -> R {
         with_full_commit_list_state(subjects, 0, true, true, None, tips, f)
+    }
+
+    fn marker_of(is_merge_base: bool, tip: Option<usize>, is_head: bool) -> String {
+        let commit = Commit::default();
+        let info = CommitInfo::new(
+            &commit,
+            Vec::new(),
+            Color::Reset,
+            is_merge_base,
+            is_head,
+            tip,
+            Vec::new(),
+        );
+        marker_symbol(&info, &ColorTheme::default()).0
+    }
+
+    #[test]
+    fn test_marker_ranks_merge_base_over_tip_over_head() {
+        // A row can be all three at once, which happens whenever you sit on one of the revisions.
+        assert_eq!(marker_of(true, Some(1), true), "\u{25c6}");
+        assert_eq!(marker_of(false, Some(1), true), "1");
+        assert_eq!(marker_of(false, None, true), "@");
+        assert_eq!(marker_of(false, None, false), "\u{2502}");
+    }
+
+    #[test]
+    fn test_marker_falls_back_when_there_are_more_tips_than_digits() {
+        assert_eq!(marker_of(false, Some(9), false), "9");
+        assert_eq!(marker_of(false, Some(10), false), "\u{25b6}");
     }
 
     #[test]

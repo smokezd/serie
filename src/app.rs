@@ -112,6 +112,17 @@ impl<'a> App<'a> {
     ) -> Self {
         let merge_base = repository.merge_base();
         let revspec_tips = repository.revspec_tips();
+        // Resolved once, up front, so both the marker and the refs-list entry agree and neither
+        // depends on the ref map being filled first.
+        let head_hash: Option<CommitHash> = match repository.head() {
+            Head::Branch { name } => repository
+                .all_refs()
+                .into_iter()
+                .find(|r| matches!(r, Ref::Branch { .. }) && r.name() == name)
+                .map(|r| r.target().clone()),
+            Head::Detached { target } => Some(target.clone()),
+            Head::None => None,
+        };
         // The ordinal is the first revspec position resolving to the commit, so two revisions
         // naming the same commit mark it once, with the earlier number.
         let tip_ordinal_of = |hash: &CommitHash| {
@@ -133,6 +144,7 @@ impl<'a> App<'a> {
                 let (pos_x, _) = graph.commit_pos_map[&commit.commit_hash];
                 let graph_color = graph_color_set.get(pos_x).to_ratatui_color();
                 let is_merge_base = merge_base == Some(&commit.commit_hash);
+                let is_head = head_hash.as_ref() == Some(&commit.commit_hash);
                 let graph_text = match ctx.graph_renderer.text_style() {
                     Some(style) => build_graph_row_text(graph, style, &commit.commit_hash)
                         .into_iter()
@@ -148,6 +160,7 @@ impl<'a> App<'a> {
                     refs,
                     graph_color,
                     is_merge_base,
+                    is_head,
                     tip_ordinal,
                     graph_text,
                 )
@@ -165,14 +178,10 @@ impl<'a> App<'a> {
             }
         };
         // `select_ref` resolves every refs-list entry through this map, so registering HEAD here
-        // makes the new node work through the existing path, attached or detached alike.
-        let head_commit_index = match repository.head() {
-            Head::Branch { name } => ref_name_to_commit_index_map.get(name.as_str()).copied(),
-            Head::Detached { target } => {
-                graph.commits.iter().position(|c| &c.commit_hash == target)
-            }
-            Head::None => None,
-        };
+        // makes the refs-list node work through the existing path, attached or detached alike.
+        let head_commit_index = head_hash
+            .as_ref()
+            .and_then(|hash| graph.commits.iter().position(|c| &c.commit_hash == hash));
         if let Some(index) = head_commit_index {
             ref_name_to_commit_index_map.insert("HEAD", index);
         }
