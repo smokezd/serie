@@ -182,20 +182,20 @@ impl From<Option<CommitOrderType>> for git::SortCommit {
     }
 }
 
-/// The width the refresh loop decides against.
+/// The display a refresh falls back to when the terminal is too narrow for a graph that is not
+/// being shown anyway.
 ///
 /// A graph hidden by `graph_toggle` must not keep a refresh from succeeding: a terminal too narrow
 /// for a graph nobody is looking at is no more an error here than it is at startup for
-/// `-g hidden`, and `Hidden` is exactly the width that never fails. Without this the refresh
-/// aborts the whole application over a graph the user had already put away.
-fn refresh_graph_width(
-    configured: Option<GraphWidthType>,
-    restored_graph_visible: Option<bool>,
-) -> Option<GraphWidthType> {
-    match restored_graph_visible {
-        Some(false) => Some(GraphWidthType::Hidden),
-        _ => configured,
-    }
+/// `-g hidden`. Only the error is swallowed — the configured `-g single` / `-g double` is left to
+/// the normal decision, so a width the user asked for survives a refresh rather than quietly
+/// reverting to `auto`.
+fn hidden_refresh_display(restored_graph_visible: Option<bool>) -> Option<check::GraphDisplay> {
+    matches!(restored_graph_visible, Some(false)).then_some(check::GraphDisplay {
+        cell_width_type: graph::CellWidthType::Single,
+        visible: false,
+        toggleable: false,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
@@ -296,18 +296,17 @@ fn main() -> Result<()> {
 
         let graph = graph::calc_graph(&repository);
 
-        let effective_graph_width = refresh_graph_width(
-            graph_width,
-            refresh_view_context
-                .as_ref()
-                .map(|context| context.list_context().graph_visible),
-        );
+        let restored_graph_visible = refresh_view_context
+            .as_ref()
+            .map(|context| context.list_context().graph_visible);
 
-        let graph_display =
-            match check::decide_graph_display(&graph, effective_graph_width, graph_renderer) {
-                Ok(graph_display) => graph_display,
-                Err(e) => break Err(e),
-            };
+        let graph_display = match check::decide_graph_display(&graph, graph_width, graph_renderer) {
+            Ok(graph_display) => graph_display,
+            Err(e) => match hidden_refresh_display(restored_graph_visible) {
+                Some(graph_display) => graph_display,
+                None => break Err(e),
+            },
+        };
 
         // Built from the renderer itself, so a text graph constructs no image manager at all
         // rather than one it never asks for — and there is no second place that has to be kept

@@ -278,28 +278,36 @@ fn options_are_parsed_before_and_after_the_revspec() {
 }
 
 #[test]
-fn refresh_keeps_a_hidden_graph_from_failing_a_narrow_refresh() {
-    use crate::{refresh_graph_width, GraphWidthType};
+fn a_hidden_graph_does_not_fail_a_narrow_refresh_and_keeps_its_width() {
+    use crate::check::decide_graph_display;
+    use crate::graph::{calc_graph, CellWidthType, GraphRenderer, GraphStyle};
+    use crate::{hidden_refresh_display, GraphWidthType};
 
-    // Startup has no refresh context, so the configured width is used as-is.
-    assert_eq!(
-        refresh_graph_width(Some(GraphWidthType::Auto), None),
-        Some(GraphWidthType::Auto)
-    );
-    // A visible graph still has to satisfy the terminal-width check on refresh.
-    assert_eq!(
-        refresh_graph_width(Some(GraphWidthType::Double), Some(true)),
-        Some(GraphWidthType::Double)
-    );
-    // A graph hidden at runtime refreshes as `Hidden`, the one width that never errors.
-    assert_eq!(
-        refresh_graph_width(Some(GraphWidthType::Double), Some(false)),
-        Some(GraphWidthType::Hidden)
-    );
-    assert_eq!(
-        refresh_graph_width(None, Some(false)),
-        Some(GraphWidthType::Hidden)
-    );
+    // Startup has no refresh context, so a too-narrow terminal is still an error.
+    assert!(hidden_refresh_display(None).is_none());
+    // So is one where the graph is on screen.
+    assert!(hidden_refresh_display(Some(true)).is_none());
+
+    // A graph hidden at runtime falls back instead of ending the session.
+    let fallback = hidden_refresh_display(Some(false)).expect("a hidden graph should not fail");
+    assert!(!fallback.visible);
+    assert!(!fallback.toggleable);
+
+    // And the fallback is only reached on error: a terminal wide enough still resolves the width
+    // the user configured, so `-g single` does not quietly become `auto` across a refresh.
+    let dir = tempfile::tempdir().unwrap();
+    let git = init_branched_repository(dir.path());
+    git.checkout("master");
+    let repository =
+        Repository::load(dir.path(), git::SortCommit::Chronological, None, false, &[]).unwrap();
+    let graph = calc_graph(&repository);
+    let display = decide_graph_display(
+        &graph,
+        Some(GraphWidthType::Single),
+        GraphRenderer::Image(GraphStyle::Rounded),
+    )
+    .unwrap();
+    assert_eq!(display.cell_width_type, CellWidthType::Single);
 }
 
 #[test]

@@ -84,6 +84,12 @@ impl Ref {
     }
 }
 
+/// What `git merge-base` reported, separating "no shared ancestor" from "could not answer".
+enum MergeBaseResult {
+    Found(CommitHash),
+    Unrelated,
+}
+
 /// What `git merge-base` had to say about the revspec.
 ///
 /// Three states, because two of them used to be one: an absent base meant both "the revspec did
@@ -178,8 +184,10 @@ impl Repository {
 
         let merge_base = match two_revisions(revspec) {
             Some((a, b)) => match load_merge_base(path, a, b) {
-                Some(hash) => MergeBase::Found(hash),
-                None => MergeBase::UnrelatedHistories,
+                Some(MergeBaseResult::Found(hash)) => MergeBase::Found(hash),
+                Some(MergeBaseResult::Unrelated) => MergeBase::UnrelatedHistories,
+                // git could not answer the question, so nothing is claimed about the revisions.
+                None => MergeBase::NotScoped,
             },
             None => MergeBase::NotScoped,
         };
@@ -339,43 +347,43 @@ fn load_revspec_tips(path: &Path, revspec: &[String]) -> Vec<CommitHash> {
     }
     // `^{commit}` peels to the commit the revision names. Without it an annotated tag resolves to
     // its own tag object, which matches no rendered commit, so the tag silently loses its marker
-    // while later revisions keep their ordinals. It also makes a non-revision fail loudly instead
-    // of being stored as a tip: `rev-parse master a.txt` prints a hash and `a.txt`, which the
-    // count check below cannot tell apart from two resolved revisions.
-    let peeled: Vec<String> = revisions
+    // while later revisions keep their ordinals.
+    //
+    // Resolved one at a time rather than in a single batch: clap consumes the first `--`, so a
+    // pathspec written the old way (`serie main topic -- f.txt`) still reaches this list. A batch
+    // fails whole when any argument is not a revision, which would drop the markers for the real
+    // branches alongside it — so each is asked for separately and the ones that are not revisions
+    // simply contribute no tip.
+    let tips: Vec<CommitHash> = revisions
         .iter()
-        .map(|rev| format!("{rev}^{{commit}}"))
+        .filter_map(|rev| resolve_commit(path, rev))
         .collect();
-    let output = Command::new("git")
-        .arg("rev-parse")
-        .args(&peeled)
-        .current_dir(path)
-        .output();
-    let Ok(output) = output else {
-        return Vec::new();
-    };
-    if !output.status.success() {
+    // Two is the floor: a lone tip is almost always the top row, and marking it says nothing.
+    if tips.len() < 2 {
         return Vec::new();
     }
-    let Ok(stdout) = String::from_utf8(output.stdout) else {
-        return Vec::new();
-    };
-    let tips: Vec<CommitHash> = stdout
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(CommitHash::from)
-        .collect();
-    // `rev-parse` prints one line per argument; anything else means it did not resolve what we
-    // asked, so fall back to marking nothing rather than mislabelling the ordinals.
-    if tips.len() == revisions.len() {
-        tips
-    } else {
-        Vec::new()
-    }
+    tips
 }
 
-fn load_merge_base(path: &Path, a: &str, b: &str) -> Option<CommitHash> {
+/// The commit a single revision names, or `None` when it names no commit at all.
+fn resolve_commit(path: &Path, rev: &str) -> Option<CommitHash> {
+    let output = Command::new("git")
+        .arg("rev-parse")
+        .arg("--verify")
+        .arg("--quiet")
+        .arg(format!("{rev}^{{commit}}"))
+        .current_dir(path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    let hash = stdout.trim();
+    (!hash.is_empty()).then(|| CommitHash::from(hash))
+}
+
+fn load_merge_base(path: &Path, a: &str, b: &str) -> Option<MergeBaseResult> {
     let output = Command::new("git")
         .arg("merge-base")
         .arg(a)
@@ -383,13 +391,17 @@ fn load_merge_base(path: &Path, a: &str, b: &str) -> Option<CommitHash> {
         .current_dir(path)
         .output()
         .ok()?;
-    // Unrelated histories exit non-zero, which is not an error worth failing the launch over.
-    if !output.status.success() {
-        return None;
+    // `git merge-base` exits 1 when the revisions share no ancestor, and 128 when one of them is
+    // not a revision at all. Only the first is "unrelated histories"; reporting the second that
+    // way states something about the user's input that was never established.
+    match output.status.code() {
+        Some(0) => {}
+        Some(1) => return Some(MergeBaseResult::Unrelated),
+        _ => return None,
     }
     let hash = String::from_utf8(output.stdout).ok()?;
     let hash = hash.trim();
-    (!hash.is_empty()).then(|| CommitHash::from(hash))
+    (!hash.is_empty()).then(|| MergeBaseResult::Found(CommitHash::from(hash)))
 }
 
 fn is_inside_work_tree(path: &Path) -> bool {

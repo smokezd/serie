@@ -525,9 +525,14 @@ impl<'a> CommitListState<'a> {
             let old_offset = self.offset;
             let size = self.height.min(self.total);
             self.offset = self.total - size;
-            self.selected += scroll_height - (self.offset - old_offset);
+            // The new offset can sit *below* the old one when the area has grown past the commit
+            // count, since `update_height` only pulls the offset back while `total > height`. The
+            // rows the offset gives up are rows the selection takes on, so this saturates rather
+            // than assuming the offset only ever moves down.
+            let consumed = self.offset.saturating_sub(old_offset);
+            self.selected += scroll_height.saturating_sub(consumed);
             if self.selected >= size {
-                self.selected = size - 1;
+                self.selected = size.saturating_sub(1);
             }
         }
     }
@@ -2210,6 +2215,24 @@ mod tests {
             state.update_height(3);
             let (selected, offset, _) = state.current_list_status();
             assert!(selected + offset < 3);
+        });
+    }
+
+    #[test]
+    fn test_scrolling_after_the_area_outgrows_the_commits() {
+        // Growing the terminal past the commit count leaves a stale offset behind, because
+        // `update_height` only pulls it back while `total > height`. A half-page scroll then found
+        // the new offset *below* the old one and underflowed working out the difference.
+        with_commit_list_state(&["a", "b", "c", "d", "e"], |state| {
+            state.update_height(2);
+            state.select_last();
+            state.update_height(30);
+
+            state.scroll_down_page();
+            state.scroll_up_page();
+
+            let (selected, offset, _) = state.current_list_status();
+            assert!(selected + offset < 5, "selection left the commit list");
         });
     }
 
