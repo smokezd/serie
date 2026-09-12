@@ -90,6 +90,9 @@ pub struct App<'a> {
     repository: &'a Repository,
     view: View<'a>,
     app_status: AppStatus,
+    /// Rows the detail pane takes when it is opened. Owned here rather than by `DetailView`, which
+    /// is rebuilt every time the view opens, so a resize outlives closing the pane.
+    detail_height: u16,
     ctx: Rc<AppContext>,
     ec: &'a EventController,
 }
@@ -199,10 +202,16 @@ impl<'a> App<'a> {
         }
         let view = View::of_list(commit_list_state, ctx.clone(), ec.sender());
 
+        let detail_height = refresh_view_context
+            .as_ref()
+            .and_then(|context| context.list_context().detail_height)
+            .unwrap_or(ctx.ui_config.detail.height);
+
         let mut app = Self {
             repository,
             view,
             app_status: AppStatus::default(),
+            detail_height,
             ctx,
             ec,
         };
@@ -340,8 +349,14 @@ impl App<'_> {
                 AppEvent::CopyToClipboard { name, value } => {
                     self.copy_to_clipboard(name, value);
                 }
-                AppEvent::Refresh(context) => {
+                AppEvent::Refresh(mut context) => {
                     self.cleanup_graph_images()?;
+                    // Only the detail view sets this, so fill it in for refreshes taken from any
+                    // other view; otherwise a resize is lost by refreshing from the commit list.
+                    context
+                        .list_context_mut()
+                        .detail_height
+                        .get_or_insert(self.detail_height);
                     let request = RefreshRequest { context };
                     return Ok(Ret::Refresh(request));
                 }
@@ -547,6 +562,7 @@ impl App<'_> {
             commit,
             changes,
             refs,
+            self.detail_height,
             self.ctx.clone(),
             self.ec.sender(),
         );
@@ -554,6 +570,8 @@ impl App<'_> {
 
     fn close_detail(&mut self) {
         if let View::Detail(ref mut view) = self.view {
+            // Kept so reopening the detail view shows the pane at the size the user left it.
+            self.detail_height = view.detail_height();
             let commit_list_state = view.take_list_state();
             self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
         }

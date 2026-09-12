@@ -277,6 +277,8 @@ fn build_lines(
         (vec![UserEvent::SelectDown], "Select older commit".into()),
         (vec![UserEvent::SelectUp], "Select newer commit".into()),
         (vec![UserEvent::GoToParent], "Select parent commit".into()),
+        (vec![UserEvent::DetailHeightIncrease], "Grow the detail pane".into()),
+        (vec![UserEvent::DetailHeightDecrease], "Shrink the detail pane".into()),
         (vec![UserEvent::Refresh], "Refresh".into()),
         (vec![UserEvent::ShortCopy], "Copy commit short hash".into()),
         (vec![UserEvent::FullCopy], "Copy commit hash".into()),
@@ -293,6 +295,7 @@ fn build_lines(
         (vec![UserEvent::NavigateRight], "Open node".into()),
         (vec![UserEvent::NavigateLeft], "Close node".into()),
         (vec![UserEvent::Refresh], "Refresh".into()),
+        (vec![UserEvent::GraphToggle], "Toggle commit graph".into()),
         (vec![UserEvent::ShortCopy], "Copy ref name".into()),
     ];
     let (refs_key_lines, refs_value_lines) = build_block_lines("Refs List:", refs_helps, color_theme, keybind);

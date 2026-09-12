@@ -42,6 +42,12 @@ The default key bindings can be overridden.
 
 #### Commit Detail
 
+The detail pane opens at `ui.detail.height` rows and can be resized with <kbd>+</kbd> and
+<kbd>-</kbd>, which take a numeric prefix like every other repeatable key (`10+` grows it by ten).
+The size is kept for the rest of the session — closing and reopening the pane, and refreshing,
+all preserve it — while `ui.detail.height` sets where it starts. The commit list always keeps at
+least one row, and the pane never shrinks below one.
+
 | Key                                  | Description                     | Corresponding keybind           |
 | ------------------------------------ | ------------------------------- | ------------------------------- |
 | <kbd>Esc</kbd> <kbd>Backspace</kbd>  | Close commit details            | `close` `cancel`                |
@@ -51,6 +57,7 @@ The default key bindings can be overridden.
 | <kbd>g/G</kbd>                       | Go to top/bottom                | `go_to_top` `go_to_bottom`      |
 | <kbd>J/K</kbd>                       | Select older/newer commit       | `select_down` `select_up`       |
 | <kbd>Alt-Down</kbd> <kbd>Alt-j</kbd> | Select parent commit            | `go_to_parent`                  |
+| <kbd>+/-</kbd>                       | Grow/shrink the detail pane     | `detail_height_increase` `detail_height_decrease` |
 | <kbd>R</kbd>                         | Refresh                         | `refresh`                       |
 | <kbd>c/C</kbd>                       | Copy commit short/full hash     | `short_copy` `full_copy`        |
 | <kbd>d</kbd>                         | Toggle custom user command view | `user_command_1`                |
@@ -64,8 +71,13 @@ The default key bindings can be overridden.
 | <kbd>J/K</kbd>                                     | Move down/up     | `select_down` `select_up`        |
 | <kbd>g/G</kbd>                                     | Go to top/bottom | `go_to_top` `go_to_bottom`       |
 | <kbd>Right/Left</kbd> <kbd>l/h</kbd>               | Open/Close node  | `navigate_right` `navigate_left` |
+| <kbd>T</kbd>                                       | Toggle commit graph | `graph_toggle`                |
 | <kbd>R</kbd>                                       | Refresh          | `refresh`                        |
 | <kbd>c</kbd>                                       | Copy ref name    | `short_copy`                     |
+
+`go_to_merge_base` and `go_to_next_tip` are list-view only: here the commit list follows whichever
+ref the tree has selected, so jumping it on its own would leave the highlighted ref describing a
+commit that is no longer selected.
 
 `HEAD` is listed first under **Branches**, above the branches themselves, and selects the commit
 you are on. It is listed whether HEAD is attached to a branch or detached; a repository with an

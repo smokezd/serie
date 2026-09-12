@@ -105,6 +105,7 @@ impl<'a> View<'a> {
         commit: Commit,
         changes: Vec<FileChange>,
         refs: Vec<Ref>,
+        detail_height: u16,
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> Self {
@@ -113,6 +114,7 @@ impl<'a> View<'a> {
             commit,
             changes,
             refs,
+            detail_height,
             ctx,
             tx,
         )))
@@ -186,6 +188,15 @@ impl RefreshViewContext {
             | RefreshViewContext::Refs { list_context, .. } => list_context,
         }
     }
+
+    pub fn list_context_mut(&mut self) -> &mut ListRefreshViewContext {
+        match self {
+            RefreshViewContext::List { list_context }
+            | RefreshViewContext::Detail { list_context }
+            | RefreshViewContext::UserCommand { list_context, .. }
+            | RefreshViewContext::Refs { list_context, .. } => list_context,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -197,6 +208,10 @@ pub struct ListRefreshViewContext {
     pub search_options: SearchOptions,
     pub search_context: Option<SearchRefreshContext>,
     pub graph_visible: bool,
+    /// Set only by the detail view, which is the only one that knows the pane height. `App` fills
+    /// it in for every other view before the refresh leaves, so a resize survives a refresh taken
+    /// from anywhere.
+    pub detail_height: Option<u16>,
 }
 
 impl From<&CommitListState<'_>> for ListRefreshViewContext {
@@ -217,6 +232,7 @@ impl From<&CommitListState<'_>> for ListRefreshViewContext {
             search_options,
             search_context,
             graph_visible,
+            detail_height: None,
         }
     }
 }

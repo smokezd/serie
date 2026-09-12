@@ -235,6 +235,8 @@ pub enum UserEvent {
     IgnoreCaseToggle,
     FuzzyToggle,
     GraphToggle,
+    DetailHeightIncrease,
+    DetailHeightDecrease,
     GoToMergeBase,
     GoToNextTip,
     Refresh,
@@ -302,6 +304,8 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "ignore_case_toggle" => Ok(UserEvent::IgnoreCaseToggle),
                         "fuzzy_toggle" => Ok(UserEvent::FuzzyToggle),
                         "graph_toggle" => Ok(UserEvent::GraphToggle),
+                        "detail_height_increase" => Ok(UserEvent::DetailHeightIncrease),
+                        "detail_height_decrease" => Ok(UserEvent::DetailHeightDecrease),
                         "go_to_merge_base" => Ok(UserEvent::GoToMergeBase),
                         "go_to_next_tip" => Ok(UserEvent::GoToNextTip),
                         "refresh" => Ok(UserEvent::Refresh),
@@ -347,6 +351,8 @@ impl UserEvent {
                 | UserEvent::PageDown
                 | UserEvent::HalfPageUp
                 | UserEvent::HalfPageDown
+                | UserEvent::DetailHeightIncrease
+                | UserEvent::DetailHeightDecrease
         )
     }
 }

@@ -381,6 +381,7 @@ impl<'a> ListView<'a> {
             search_options,
             search_context,
             graph_visible,
+            detail_height: _, // restored by `App`, which owns it across views
         } = list_context;
         let list_state = self.as_mut_list_state();
         list_state.restore_search_options(*search_options);

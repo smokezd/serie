@@ -703,6 +703,12 @@
         "graph_toggle": {
           "$ref": "#/definitions/keybindArray"
         },
+        "detail_height_increase": {
+          "$ref": "#/definitions/keybindArray"
+        },
+        "detail_height_decrease": {
+          "$ref": "#/definitions/keybindArray"
+        },
         "go_to_merge_base": {
           "$ref": "#/definitions/keybindArray"
         },
