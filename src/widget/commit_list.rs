@@ -19,7 +19,7 @@ use crate::{
     color::ColorTheme,
     config::UserListColumnType,
     git::{Commit, CommitHash, Head, MergeBase, Ref},
-    graph::GraphImageManager,
+    graph::GraphRows,
     protocol::PreparedImage,
     search::{SearchOptions, SearchTarget},
 };
@@ -37,9 +37,6 @@ pub struct CommitInfo<'a> {
     is_head: bool,
     /// 1-based position in the revspec when this commit is one of its tips.
     tip_ordinal: Option<usize>,
-    /// The graph row rendered as text with lane colours already resolved, empty unless the text
-    /// renderer is in use.
-    graph_text: Vec<Option<(char, Color)>>,
 }
 
 impl<'a> CommitInfo<'a> {
@@ -50,7 +47,6 @@ impl<'a> CommitInfo<'a> {
         is_merge_base: bool,
         is_head: bool,
         tip_ordinal: Option<usize>,
-        graph_text: Vec<Option<(char, Color)>>,
     ) -> Self {
         Self {
             commit,
@@ -59,7 +55,6 @@ impl<'a> CommitInfo<'a> {
             is_merge_base,
             is_head,
             tip_ordinal,
-            graph_text,
         }
     }
 }
@@ -234,11 +229,10 @@ pub enum GraphToggleResult {
 pub struct CommitListState<'a> {
     commits: Vec<CommitInfo<'a>>,
     commit_hash_set: FxHashSet<&'a CommitHash>,
-    graph_image_manager: GraphImageManager<'a>,
+    graph_rows: GraphRows<'a>,
     graph_area_width: u16,
     graph_visible: bool,
     graph_toggleable: bool,
-    text_graph: bool,
     head: &'a Head,
     merge_base: &'a MergeBase,
     /// The revspec tips as hashes, not rows: resolving to rows here would lose the difference
@@ -261,11 +255,10 @@ pub struct CommitListState<'a> {
 impl<'a> CommitListState<'a> {
     pub fn new(
         commits: Vec<CommitInfo<'a>>,
-        graph_image_manager: GraphImageManager<'a>,
+        graph_rows: GraphRows<'a>,
         graph_area_width: u16,
         graph_visible: bool,
         graph_toggleable: bool,
-        text_graph: bool,
         head: &'a Head,
         merge_base: &'a MergeBase,
         revspec_tips: &'a [CommitHash],
@@ -277,11 +270,10 @@ impl<'a> CommitListState<'a> {
         CommitListState {
             commits,
             commit_hash_set,
-            graph_image_manager,
+            graph_rows,
             graph_area_width,
             graph_visible,
             graph_toggleable,
-            text_graph,
             head,
             merge_base,
             revspec_tips,
@@ -407,30 +399,34 @@ impl<'a> CommitListState<'a> {
         if !self.graph_visible {
             return; // nothing is drawn, so nothing needs to reach the terminal
         }
-        if self.text_graph {
-            return; // text rows are plain cells; no image ever reaches the terminal
-        }
-        self.commits
+        // A text graph carries no manager at all now, so "text rows upload nothing" is a fact
+        // about the type rather than a guard that has to be remembered here.
+        let (offset, height) = (self.offset, self.height);
+        let commits = &self.commits;
+        let Some(manager) = self.graph_rows.image_manager_mut() else {
+            return;
+        };
+        commits
             .iter()
-            .skip(self.offset)
-            .take(self.height)
+            .skip(offset)
+            .take(height)
             .for_each(|commit_info| {
-                self.graph_image_manager
-                    .ensure_uploaded(&commit_info.commit.commit_hash);
+                manager.ensure_uploaded(&commit_info.commit.commit_hash);
             });
     }
 
     pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
-        self.graph_image_manager.drain_pending_uploads()
+        match self.graph_rows.image_manager_mut() {
+            Some(manager) => manager.drain_pending_uploads(),
+            None => Vec::new(),
+        }
     }
 
     pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
-        let mut image_ids: Vec<u32> = self
-            .graph_image_manager
-            .image_ids()
-            .iter()
-            .copied()
-            .collect();
+        let Some(manager) = self.graph_rows.image_manager() else {
+            return Vec::new();
+        };
+        let mut image_ids: Vec<u32> = manager.image_ids().iter().copied().collect();
         image_ids.sort_unstable();
         image_ids
     }
@@ -861,9 +857,24 @@ impl<'a> CommitListState<'a> {
         }
     }
 
-    fn prepared_image(&self, commit_info: &'a CommitInfo) -> &PreparedImage {
-        self.graph_image_manager
-            .prepared_image(&commit_info.commit.commit_hash)
+    fn prepared_image(&self, commit_info: &'a CommitInfo) -> Option<&PreparedImage> {
+        Some(
+            self.graph_rows
+                .image_manager()?
+                .prepared_image(&commit_info.commit.commit_hash),
+        )
+    }
+
+    /// True when the graph is drawn as characters rather than uploaded as images.
+    pub fn text_graph(&self) -> bool {
+        self.graph_rows.is_text()
+    }
+
+    fn graph_text_row(&self, commit_info: &CommitInfo) -> Vec<Option<(char, Color)>> {
+        match self.graph_rows.text_manager() {
+            Some(manager) => manager.row(&commit_info.commit.commit_hash),
+            None => Vec::new(),
+        }
     }
 }
 
@@ -894,7 +905,7 @@ impl<'a> StatefulWidget for CommitList<'a> {
             self.ctx.ui_config.list.name_width,
             self.ctx.ui_config.list.date_width,
             &self.ctx.ui_config.list.columns,
-            state.text_graph,
+            state.text_graph(),
         );
         let chunks = Layout::horizontal(constraints).split(area);
 
@@ -932,13 +943,15 @@ impl CommitList<'_> {
         if area.is_empty() {
             return;
         }
-        if self.ctx.graph_renderer.text_style().is_some() {
+        if state.text_graph() {
             self.render_graph_text(buf, area, state);
             return;
         }
         self.rendering_commit_info_iter(state)
             .for_each(|(i, commit_info)| {
-                let prepared_image = state.prepared_image(commit_info);
+                let Some(prepared_image) = state.prepared_image(commit_info) else {
+                    return;
+                };
                 let max_graph_width = area.width.saturating_sub(1) as usize;
                 let y = area.top() + i as u16;
                 for (x, image_cell) in prepared_image
@@ -955,18 +968,14 @@ impl CommitList<'_> {
             });
     }
 
-    /// Draws the precomputed text rows. Unlike the image path there is no protocol and no upload,
-    /// so this works in any terminal.
+    /// Draws the text rows, built here for the visible commits only. Unlike the image path there
+    /// is no protocol and no upload, so this works in any terminal.
     fn render_graph_text(&self, buf: &mut Buffer, area: Rect, state: &CommitListState) {
         self.rendering_commit_info_iter(state)
             .for_each(|(i, commit_info)| {
                 let y = area.top() + i as u16;
-                for (x, text_cell) in commit_info
-                    .graph_text
-                    .iter()
-                    .take(area.width as usize)
-                    .enumerate()
-                {
+                let row = state.graph_text_row(commit_info);
+                for (x, text_cell) in row.iter().take(area.width as usize).enumerate() {
                     let Some((symbol, color)) = text_cell else {
                         continue;
                     };
@@ -1461,7 +1470,7 @@ mod tests {
         color::GraphColorSet,
         config::GraphColorConfig,
         git::Repository,
-        graph::{calc_graph, CellWidthType, GraphImageWidthMode, GraphStyle},
+        graph::{calc_graph, CellWidthType, GraphImageManager, GraphImageWidthMode, GraphStyle},
         protocol::ImageProtocol,
     };
 
@@ -1531,14 +1540,14 @@ mod tests {
         );
         let graph = calc_graph(&repository);
         let graph_color_set = GraphColorSet::new(&GraphColorConfig::default());
-        let graph_image_manager = GraphImageManager::new(
+        let graph_rows = GraphRows::Image(Box::new(GraphImageManager::new(
             &graph,
             &graph_color_set,
             CellWidthType::Double,
             GraphStyle::Rounded,
             GraphImageWidthMode::Compact,
             ImageProtocol::Iterm2,
-        );
+        )));
         let commit_infos = graph
             .commits
             .iter()
@@ -1552,17 +1561,15 @@ mod tests {
                     is_merge_base,
                     false,
                     None,
-                    Vec::new(),
                 )
             })
             .collect();
         let mut state = CommitListState::new(
             commit_infos,
-            graph_image_manager,
+            graph_rows,
             graph_cell_width,
             graph_visible,
             graph_toggleable,
-            false,
             repository.head(),
             repository.merge_base(),
             repository.revspec_tips(),
@@ -2004,7 +2011,6 @@ mod tests {
             is_merge_base,
             is_head,
             tip,
-            Vec::new(),
         );
         marker_cells(&info, &ColorTheme::default())
             .iter()
@@ -2043,15 +2049,7 @@ mod tests {
     #[test]
     fn test_only_markers_are_bold_not_the_lane_tick() {
         let commit = Commit::default();
-        let info = CommitInfo::new(
-            &commit,
-            Vec::new(),
-            Color::Reset,
-            false,
-            false,
-            Some(1),
-            Vec::new(),
-        );
+        let info = CommitInfo::new(&commit, Vec::new(), Color::Reset, false, false, Some(1));
         let cells = marker_cells(&info, &ColorTheme::default());
         assert!(cells[0].bold, "a tip marker should stand out");
         assert!(!cells[1].bold, "the lane tick is a divider, not a marker");

@@ -278,7 +278,6 @@ fn main() -> Result<()> {
         ui_config,
         color_theme,
         image_protocol,
-        graph_renderer,
         revspec_label: (!revspec.is_empty()).then(|| revspec.join(" ")),
     });
 
@@ -310,18 +309,24 @@ fn main() -> Result<()> {
                 Err(e) => break Err(e),
             };
 
-        let graph_image_manager = GraphImageManager::new(
-            &graph,
-            &graph_color_set,
-            graph_display.cell_width_type,
-            // The image style only matters to the image renderer; a text graph never asks the
-            // manager for a row.
-            graph_renderer
-                .image_style()
-                .unwrap_or(graph::GraphStyle::Rounded),
-            graph_image_width_mode,
-            image_protocol,
-        );
+        // Built from the renderer itself, so a text graph constructs no image manager at all
+        // rather than one it never asks for — and there is no second place that has to be kept
+        // agreeing about which renderer is in use.
+        let graph_rows = match graph_renderer {
+            graph::GraphRenderer::Image(style) => {
+                graph::GraphRows::Image(Box::new(GraphImageManager::new(
+                    &graph,
+                    &graph_color_set,
+                    graph_display.cell_width_type,
+                    style,
+                    graph_image_width_mode,
+                    image_protocol,
+                )))
+            }
+            graph::GraphRenderer::Text(style) => graph::GraphRows::Text(
+                graph::GraphTextManager::new(&graph, style, &graph_color_set),
+            ),
+        };
 
         if terminal.is_none() {
             terminal = Some(ratatui::init());
@@ -329,7 +334,7 @@ fn main() -> Result<()> {
 
         let mut app = App::new(
             &repository,
-            graph_image_manager,
+            graph_rows,
             &graph,
             &graph_color_set,
             graph_display,

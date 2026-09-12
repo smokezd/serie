@@ -1,4 +1,7 @@
+use ratatui::style::Color;
+
 use crate::{
+    color::GraphColorSet,
     git::CommitHash,
     graph::calc::{Edge, EdgeType, Graph},
 };
@@ -12,33 +15,18 @@ pub enum TextStyle {
     Unicode,
 }
 
-/// How the commit graph is drawn. `Image` needs a terminal image protocol and a cell width;
-/// `Text` needs neither, so it works in any terminal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GraphRenderer {
-    Image(super::image::GraphStyle),
-    Text(TextStyle),
-}
-
-impl GraphRenderer {
-    pub fn text_style(&self) -> Option<TextStyle> {
-        match self {
-            GraphRenderer::Image(_) => None,
-            GraphRenderer::Text(style) => Some(*style),
-        }
-    }
-
-    pub fn image_style(&self) -> Option<super::image::GraphStyle> {
-        match self {
-            GraphRenderer::Image(style) => Some(*style),
-            GraphRenderer::Text(_) => None,
-        }
-    }
-}
-
 /// Terminal columns a single lane occupies. Two, so that a horizontal run has a column to cross
 /// between one lane and the next, the same spacing `git log --graph` uses.
 pub const CELLS_PER_LANE: usize = 2;
+
+/// Terminal columns a whole text graph occupies.
+///
+/// Every row shares one grid, so this is the width of each of them — the caller laying out the
+/// column and the renderer filling it have to agree, and a drift between the two would be hidden
+/// by `render_graph_text` clipping rather than reported.
+pub fn text_graph_width(graph: &Graph<'_>) -> usize {
+    (graph.max_pos_x + 1) * CELLS_PER_LANE
+}
 
 /// One rendered column: the glyph, and the lane whose colour it takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,7 +95,7 @@ pub fn build_graph_row_text(
     commit_hash: &CommitHash,
 ) -> Vec<Option<TextCell>> {
     let (pos_x, pos_y) = graph.commit_pos_map[commit_hash];
-    let width = (graph.max_pos_x + 1) * CELLS_PER_LANE;
+    let width = text_graph_width(graph);
 
     let mut connections: Vec<Connections> = vec![Connections::default(); width];
     // The lane each column takes its colour from. The first edge to paint a column wins, so a
@@ -305,5 +293,49 @@ mod tests {
         // The lane keeps its vertical and gains the branch, so it reads as a tee.
         assert_eq!(render(&edges, 1, TextStyle::Unicode), "├─  ");
         assert_eq!(render(&edges, 1, TextStyle::Ascii), "+-  ");
+    }
+}
+
+/// Builds text graph rows on demand, mirroring `GraphImageManager`.
+///
+/// The rows used to be built for every commit in `App::new`, before the first frame and again on
+/// every refresh, which cost commits × lanes of work and memory the image path never paid. Only
+/// the visible rows are ever drawn, and a row is pure integer arithmetic, so there is nothing
+/// worth caching: building one costs less than keeping one.
+#[derive(Debug)]
+pub struct GraphTextManager<'a> {
+    graph: &'a Graph<'a>,
+    style: TextStyle,
+    graph_color_set: &'a GraphColorSet,
+}
+
+impl<'a> GraphTextManager<'a> {
+    pub fn new(graph: &'a Graph<'a>, style: TextStyle, graph_color_set: &'a GraphColorSet) -> Self {
+        GraphTextManager {
+            graph,
+            style,
+            graph_color_set,
+        }
+    }
+
+    pub fn width(&self) -> usize {
+        text_graph_width(self.graph)
+    }
+
+    /// One entry per terminal column: the glyph and the colour of the lane it belongs to. The
+    /// lane-to-colour step happens here, the way `GraphImageManager` resolves colours when it
+    /// draws, so the cell-building logic itself stays free of theming.
+    pub fn row(&self, commit_hash: &CommitHash) -> Vec<Option<(char, Color)>> {
+        build_graph_row_text(self.graph, self.style, commit_hash)
+            .into_iter()
+            .map(|cell| {
+                cell.map(|c| {
+                    (
+                        c.symbol,
+                        self.graph_color_set.get(c.lane).to_ratatui_color(),
+                    )
+                })
+            })
+            .collect()
     }
 }

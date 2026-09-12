@@ -22,10 +22,7 @@ use crate::{
         copy_to_clipboard, exec_user_command, exec_user_command_suspend, ExternalCommandParameters,
     },
     git::{Commit, CommitHash, FileChange, Head, MergeBase, Ref, Repository},
-    graph::{
-        build_graph_row_text, CellWidthType, Graph, GraphImageManager, GraphRenderer,
-        CELLS_PER_LANE,
-    },
+    graph::{CellWidthType, Graph, GraphRows},
     keybind::KeyBind,
     protocol::ImageProtocol,
     search::SearchOptions,
@@ -76,7 +73,6 @@ pub struct AppContext {
     pub ui_config: UiConfig,
     pub color_theme: ColorTheme,
     pub image_protocol: ImageProtocol,
-    pub graph_renderer: GraphRenderer,
     /// The revspec the log was scoped to, shown in the status line so that a filtered view is
     /// not mistaken for the whole repository. `None` when every ref is rendered.
     pub revspec_label: Option<String>,
@@ -101,7 +97,7 @@ pub struct App<'a> {
 impl<'a> App<'a> {
     pub fn new(
         repository: &'a Repository,
-        graph_image_manager: GraphImageManager<'a>,
+        graph_rows: GraphRows<'a>,
         graph: &'a Graph,
         graph_color_set: &'a GraphColorSet,
         graph_display: GraphDisplay,
@@ -146,15 +142,6 @@ impl<'a> App<'a> {
                 let is_merge_base =
                     matches!(merge_base, MergeBase::Found(hash) if hash == &commit.commit_hash);
                 let is_head = head_hash.as_ref() == Some(&commit.commit_hash);
-                let graph_text = match ctx.graph_renderer.text_style() {
-                    Some(style) => build_graph_row_text(graph, style, &commit.commit_hash)
-                        .into_iter()
-                        .map(|cell| {
-                            cell.map(|c| (c.symbol, graph_color_set.get(c.lane).to_ratatui_color()))
-                        })
-                        .collect(),
-                    None => Vec::new(),
-                };
                 let tip_ordinal = tip_ordinal_of(&commit.commit_hash);
                 CommitInfo::new(
                     commit,
@@ -163,20 +150,17 @@ impl<'a> App<'a> {
                     is_merge_base,
                     is_head,
                     tip_ordinal,
-                    graph_text,
                 )
             })
             .collect();
         // The whole column, padding included. The image renderer wants a trailing pad column; a
         // text row already ends in the last lane's blank right half.
-        let text_graph = ctx.graph_renderer.text_style().is_some();
-        let graph_area_width = if text_graph {
-            ((graph.max_pos_x + 1) * CELLS_PER_LANE) as u16
-        } else {
-            match graph_display.cell_width_type {
+        let graph_area_width = match &graph_rows {
+            GraphRows::Text(manager) => manager.width() as u16,
+            GraphRows::Image(_) => match graph_display.cell_width_type {
                 CellWidthType::Double => (graph.max_pos_x + 1) as u16 * 2 + 1,
                 CellWidthType::Single => (graph.max_pos_x + 1) as u16 + 1,
-            }
+            },
         };
         // `select_ref` resolves every refs-list entry through this map, so registering HEAD here
         // makes the refs-list node work through the existing path, attached or detached alike.
@@ -190,11 +174,10 @@ impl<'a> App<'a> {
         let head = repository.head();
         let mut commit_list_state = CommitListState::new(
             commits,
-            graph_image_manager,
+            graph_rows,
             graph_area_width,
             graph_display.visible,
             graph_display.toggleable,
-            text_graph,
             head,
             merge_base,
             revspec_tips,

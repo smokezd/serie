@@ -8,11 +8,12 @@ use ratatui::{
 
 use crate::{
     app::AppContext,
+    config::UserListColumnType,
     event::{AppEvent, Sender, UserEvent, UserEventWithCount},
     git::Ref,
     view::{ListRefreshViewContext, RefreshViewContext, RefsRefreshViewContext},
     widget::{
-        commit_list::{CommitList, CommitListState},
+        commit_list::{CommitList, CommitListState, GraphToggleResult},
         ref_list::{RefList, RefListState},
     },
 };
@@ -85,6 +86,9 @@ impl<'a> RefsView<'a> {
             UserEvent::ShortCopy | UserEvent::FullCopy => {
                 self.copy_ref_name();
             }
+            UserEvent::GraphToggle => {
+                self.toggle_graph();
+            }
             UserEvent::HelpToggle => {
                 self.tx.send(AppEvent::OpenHelp);
             }
@@ -141,6 +145,42 @@ impl<'a> RefsView<'a> {
         let refs_width =
             (area.width.saturating_sub(graph_width)).min(self.ctx.ui_config.refs.width);
         Layout::horizontal([Constraint::Min(0), Constraint::Length(refs_width)]).areas(area)
+    }
+
+    /// The same behaviour as in the list view: the commit list is on screen here too, so the key
+    /// that hides its graph column has to work here too.
+    ///
+    /// `go_to_merge_base` and `go_to_next_tip` are deliberately *not* forwarded. Here the commit
+    /// list follows whichever ref the tree has selected, so jumping it on its own would leave the
+    /// highlighted ref describing a commit that is no longer selected.
+    fn toggle_graph(&mut self) {
+        if !self
+            .ctx
+            .ui_config
+            .list
+            .columns
+            .contains(&UserListColumnType::Graph)
+        {
+            self.tx.send(AppEvent::UpdateStatusTransient(
+                "Graph column is not enabled".into(),
+            ));
+            return;
+        }
+        match self.as_mut_list_state().toggle_graph() {
+            GraphToggleResult::Shown => {}
+            GraphToggleResult::Hidden => {
+                self.tx.send(AppEvent::ClearGraphImages);
+            }
+            GraphToggleResult::TerminalTooSmall => {
+                // `toggleable` is decided once, against the terminal as it was at startup, so
+                // this can be stale on a terminal the user has since widened. Naming the refresh
+                // is what makes the refusal actionable rather than wrong-looking.
+                self.tx.send(AppEvent::NotifyError(
+                    "Terminal was too small for the commit graph at startup; resize, then refresh"
+                        .into(),
+                ));
+            }
+        }
     }
 
     fn update_commit_list_selected(&mut self) {

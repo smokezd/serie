@@ -493,13 +493,17 @@ fn load_all_commits(
         commits.push(commit);
     }
 
+    // Drained before waiting: a child that fills the stderr pipe blocks writing to it, and
+    // `wait()` would then never return. git only ever writes a line or two here, but the ordering
+    // is what makes that a fact about git rather than a thing this code relies on.
+    let mut stderr = String::new();
+    if let Some(mut pipe) = process.stderr.take() {
+        pipe.read_to_string(&mut stderr).ok();
+    }
+
     let status = process.wait().unwrap();
     if !status.success() {
         // git has already told the user exactly what is wrong with their revspec
-        let mut stderr = String::new();
-        if let Some(mut pipe) = process.stderr.take() {
-            pipe.read_to_string(&mut stderr).ok();
-        }
         let stderr = stderr.trim();
         return Err(if stderr.is_empty() {
             format!("git log failed with {status}").into()

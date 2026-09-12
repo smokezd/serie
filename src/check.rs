@@ -15,6 +15,9 @@ pub struct GraphDisplay {
     pub visible: bool,
     /// False when the terminal is too narrow for even a single-width graph. Toggling is refused
     /// rather than drawing a clipped graph.
+    ///
+    /// Decided once, against the terminal as it was when this ran. Widening the terminal does not
+    /// revive a refused toggle until the next refresh, which is why the refusal names it.
     pub toggleable: bool,
 }
 

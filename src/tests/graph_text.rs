@@ -8,7 +8,7 @@ use chrono::{TimeZone, Utc};
 
 use crate::{
     git::{self, Repository},
-    graph::{build_graph_row_text, calc_graph, TextStyle},
+    graph::{build_graph_row_text, calc_graph, text_graph_width, TextStyle},
     test_git::GitRepository,
 };
 
@@ -130,7 +130,7 @@ fn test_lanes_stay_aligned_across_rows() -> TestResult {
     let repository =
         Repository::load(dir.path(), git::SortCommit::Chronological, None, false, &[])?;
     let graph = calc_graph(&repository);
-    let width = (graph.max_pos_x + 1) * 2;
+    let width = text_graph_width(&graph);
     for commit in &graph.commits {
         let cells = build_graph_row_text(&graph, TextStyle::Unicode, &commit.commit_hash);
         assert_eq!(

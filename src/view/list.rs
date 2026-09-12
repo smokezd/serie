@@ -297,8 +297,12 @@ impl<'a> ListView<'a> {
                 self.tx.send(AppEvent::ClearGraphImages);
             }
             GraphToggleResult::TerminalTooSmall => {
+                // `toggleable` is decided once, against the terminal as it was at startup, so
+                // this can be stale on a terminal the user has since widened. Naming the refresh
+                // is what makes the refusal actionable rather than wrong-looking.
                 self.tx.send(AppEvent::NotifyError(
-                    "Terminal too small to show the commit graph".into(),
+                    "Terminal was too small for the commit graph at startup; resize, then refresh"
+                        .into(),
                 ));
             }
         }
