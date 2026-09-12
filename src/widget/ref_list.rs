@@ -24,7 +24,7 @@ const TREE_TAG_ROOT_TEXT: &str = "Tags";
 const TREE_STASH_ROOT_TEXT: &str = "Stashes";
 
 /// Both the node text and the identifier `select_ref` resolves, so the two cannot drift apart.
-const TREE_HEAD_IDENT: &str = "HEAD";
+pub const TREE_HEAD_IDENT: &str = "HEAD";
 
 #[derive(Debug)]
 pub struct RefListState {

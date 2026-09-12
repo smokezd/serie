@@ -14,7 +14,7 @@ use crate::{
     view::{ListRefreshViewContext, RefreshViewContext, RefsRefreshViewContext},
     widget::{
         commit_list::{CommitList, CommitListState, GraphToggleResult},
-        ref_list::{RefList, RefListState},
+        ref_list::{RefList, RefListState, TREE_HEAD_IDENT},
     },
 };
 
@@ -187,10 +187,13 @@ impl<'a> RefsView<'a> {
         let Some(selected) = self.ref_list_state.selected_ref_name() else {
             return;
         };
-        if !self.as_mut_list_state().select_ref(&selected) {
-            // `HEAD` is listed from the `Head` enum alone, so it can name a commit that
-            // `--max-count` or the revspec kept off the list. Saying so beats a key that looks
-            // broken, and matches how the merge-base and tip jumps report the same situation.
+        // Only `HEAD` is worth announcing. It is listed from the `Head` enum alone, so it can name
+        // a commit that `--max-count` or the revspec kept off the list, and a silent no-op there
+        // looks like a dead key. Every other miss is a root or a folder node — `selected_ref_name`
+        // returns the last path segment whatever the node is — and those never name a commit, so
+        // announcing them would put "Branches is not among the rendered commits" on screen every
+        // time the cursor passed over one.
+        if !self.as_mut_list_state().select_ref(&selected) && selected == TREE_HEAD_IDENT {
             self.tx.send(AppEvent::UpdateStatusTransient(format!(
                 "{selected} is not among the rendered commits"
             )));
