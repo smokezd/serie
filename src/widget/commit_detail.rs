@@ -22,25 +22,29 @@ use crate::{
 pub enum MessageLines {
     #[default]
     Full,
+    Two,
     Five,
     Ten,
 }
 
 impl MessageLines {
     /// Cycles toward the shortest first: the reason to reach for this key is usually to get the
-    /// changed files on screen, and five lines does that in one press.
+    /// changed files on screen, and two lines does that in one press.
     pub fn next(self) -> Self {
         match self {
-            MessageLines::Full => MessageLines::Five,
+            MessageLines::Full => MessageLines::Two,
+            MessageLines::Two => MessageLines::Five,
             MessageLines::Five => MessageLines::Ten,
             MessageLines::Ten => MessageLines::Full,
         }
     }
 
-    /// Lines the message block may occupy, subject and its blank separator included.
+    /// Lines the message block may occupy, subject and its blank separator included. Two is
+    /// therefore the subject on its own, which is as short as the block goes.
     fn limit(self) -> Option<usize> {
         match self {
             MessageLines::Full => None,
+            MessageLines::Two => Some(2),
             MessageLines::Five => Some(5),
             MessageLines::Ten => Some(10),
         }
@@ -411,15 +415,17 @@ mod tests {
     fn test_toggle_reaches_the_shortest_first() {
         // One press is what someone does to get the changed files on screen, so it should be the
         // press that frees the most room.
-        let five = MessageLines::Full.next();
-        assert_eq!(five, MessageLines::Five);
-        assert_eq!(five.next(), MessageLines::Ten);
-        assert_eq!(five.next().next(), MessageLines::Full);
+        let two = MessageLines::Full.next();
+        assert_eq!(two, MessageLines::Two);
+        assert_eq!(two.next(), MessageLines::Five);
+        assert_eq!(two.next().next(), MessageLines::Ten);
+        assert_eq!(two.next().next().next(), MessageLines::Full);
     }
 
     #[test]
     fn test_limits_match_the_names() {
         assert_eq!(MessageLines::Full.limit(), None);
+        assert_eq!(MessageLines::Two.limit(), Some(2));
         assert_eq!(MessageLines::Five.limit(), Some(5));
         assert_eq!(MessageLines::Ten.limit(), Some(10));
     }

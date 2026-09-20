@@ -158,6 +158,7 @@ impl<'a> DetailView<'a> {
                 self.tx
                     .send(AppEvent::UpdateStatusTransient(match message_lines {
                         MessageLines::Full => "Commit message: full".into(),
+                        MessageLines::Two => "Commit message: 2 lines".into(),
                         MessageLines::Five => "Commit message: 5 lines".into(),
                         MessageLines::Ten => "Commit message: 10 lines".into(),
                     }));

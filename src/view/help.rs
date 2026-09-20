@@ -282,7 +282,7 @@ fn build_lines(
         (vec![UserEvent::GoToParent], "Select parent commit".into()),
         (vec![UserEvent::DetailHeightIncrease], "Grow the detail pane".into()),
         (vec![UserEvent::DetailHeightDecrease], "Shrink the detail pane".into()),
-        (vec![UserEvent::DetailMessageToggle], "Show 5 / 10 / all message lines".into()),
+        (vec![UserEvent::DetailMessageToggle], "Show 2 / 5 / 10 / all message lines".into()),
         (vec![UserEvent::Refresh], "Refresh".into()),
         (vec![UserEvent::ShortCopy], "Copy commit short hash".into()),
         (vec![UserEvent::FullCopy], "Copy commit hash".into()),
