@@ -33,6 +33,7 @@ fn load(repo_path: &Path, revspec: &[&str]) -> Result<Repository, Box<dyn std::e
         None,
         false,
         &revspec,
+        false,
     )
 }
 
@@ -298,8 +299,15 @@ fn a_hidden_graph_does_not_fail_a_narrow_refresh_and_keeps_its_width() {
     let dir = tempfile::tempdir().unwrap();
     let git = init_branched_repository(dir.path());
     git.checkout("master");
-    let repository =
-        Repository::load(dir.path(), git::SortCommit::Chronological, None, false, &[]).unwrap();
+    let repository = Repository::load(
+        dir.path(),
+        git::SortCommit::Chronological,
+        None,
+        false,
+        &[],
+        false,
+    )
+    .unwrap();
     let graph = calc_graph(&repository);
     let display = decide_graph_display(
         &graph,
@@ -394,6 +402,7 @@ fn max_count_survives_a_pathspec_separator() -> TestResult {
         Some(1),
         false,
         &revspec,
+        false,
     )?;
 
     assert_eq!(repository.all_commits().len(), 1);

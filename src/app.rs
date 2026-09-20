@@ -957,6 +957,9 @@ fn build_external_command_parameters<'a>(
     view_area: Rect,
     ctx: &'a AppContext,
 ) -> Result<ExternalCommandParameters<'a>, String> {
+    if commit.commit_hash.is_uncommitted_pseudo() {
+        return Err("user commands are not available for uncommitted changes".to_string());
+    }
     let command = &extract_user_command_by_number(user_command_number, ctx)?.commands;
     let target_hash = commit.commit_hash.as_str();
     let parent_hashes = commit

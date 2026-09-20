@@ -62,6 +62,11 @@
                 "head"
               ],
               "default": "latest"
+            },
+            "uncommitted": {
+              "type": "boolean",
+              "description": "Show local uncommitted changes as staged/unstaged rows above HEAD. The command line arguments --uncommitted and --no-uncommitted take precedence.",
+              "default": false
             }
           },
           "additionalProperties": false

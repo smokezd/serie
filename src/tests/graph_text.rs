@@ -18,8 +18,15 @@ const DATE: &str = "2024-01-01";
 
 /// Renders every row of the graph, one line per commit, trailing blanks trimmed.
 fn render(repo_path: &std::path::Path, style: TextStyle) -> String {
-    let repository =
-        Repository::load(repo_path, git::SortCommit::Chronological, None, false, &[]).unwrap();
+    let repository = Repository::load(
+        repo_path,
+        git::SortCommit::Chronological,
+        None,
+        false,
+        &[],
+        false,
+    )
+    .unwrap();
     let graph = calc_graph(&repository);
     graph
         .commits
@@ -127,8 +134,14 @@ fn test_lanes_stay_aligned_across_rows() -> TestResult {
     git.checkout("master");
     dated(git, "003", 3);
 
-    let repository =
-        Repository::load(dir.path(), git::SortCommit::Chronological, None, false, &[])?;
+    let repository = Repository::load(
+        dir.path(),
+        git::SortCommit::Chronological,
+        None,
+        false,
+        &[],
+        false,
+    )?;
     let graph = calc_graph(&repository);
     let width = text_graph_width(&graph);
     for commit in &graph.commits {

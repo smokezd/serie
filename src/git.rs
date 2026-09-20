@@ -13,6 +13,11 @@ use crate::Result;
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CommitHash(String);
 
+/// Hashes no real commit ever has: each contains a letter outside `0-9a-f`, so neither can
+/// collide with an actual (hex) commit hash of any length.
+pub const UNSTAGED_COMMIT_HASH: &str = "unstaged-changes-uncommitted";
+pub const STAGED_COMMIT_HASH: &str = "staged-changes-uncommitted";
+
 impl CommitHash {
     pub fn as_short_hash(&self) -> &str {
         &self.0[0..7]
@@ -20,6 +25,12 @@ impl CommitHash {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Whether this names one of the synthetic staged/unstaged rows rather than a real commit;
+    /// see `--uncommitted`.
+    pub fn is_uncommitted_pseudo(&self) -> bool {
+        self.0 == UNSTAGED_COMMIT_HASH || self.0 == STAGED_COMMIT_HASH
     }
 }
 
@@ -150,6 +161,7 @@ impl Repository {
         max_count: Option<usize>,
         mailmap: bool,
         revspec: &[String],
+        include_uncommitted: bool,
     ) -> Result<Self> {
         check_git_repository(path)?;
 
@@ -168,6 +180,11 @@ impl Repository {
         }
 
         let commits = merge_stashes_to_commits(commits, stashes);
+        let commits = if include_uncommitted {
+            insert_uncommitted_pseudo_commits(commits, path)
+        } else {
+            commits
+        };
         let commit_hashes = commits.iter().map(|c| c.commit_hash.clone()).collect();
 
         let (parents_map, children_map) = build_commits_maps(&commits);
@@ -284,7 +301,11 @@ impl Repository {
 
     pub fn commit_detail(&self, commit_hash: &CommitHash) -> (Commit, Vec<FileChange>) {
         let commit = self.commit(commit_hash).unwrap().clone();
-        let changes = if commit.parent_commit_hashes.is_empty() {
+        let changes = if commit_hash.as_str() == STAGED_COMMIT_HASH {
+            get_staged_diff_summary(&self.path)
+        } else if commit_hash.as_str() == UNSTAGED_COMMIT_HASH {
+            get_unstaged_diff_summary(&self.path)
+        } else if commit.parent_commit_hashes.is_empty() {
             get_initial_commit_additions(&self.path, commit_hash)
         } else {
             get_diff_summary(&self.path, commit_hash)
@@ -661,6 +682,120 @@ fn merge_stashes_to_commits(commits: Vec<Commit>, stashes: Vec<Commit>) -> Vec<C
     ret
 }
 
+/// Splices synthetic "staged changes" / "unstaged changes" rows directly above HEAD, one commit
+/// each, only for the categories that actually have content. Silently a no-op when HEAD cannot be
+/// resolved or isn't part of the rendered set (a revspec scoped it out): the flag has nothing to
+/// anchor to, which is not an error.
+fn insert_uncommitted_pseudo_commits(commits: Vec<Commit>, path: &Path) -> Vec<Commit> {
+    let Some(head_hash) = resolve_commit(path, "HEAD") else {
+        return commits;
+    };
+    if !commits.iter().any(|c| c.commit_hash == head_hash) {
+        return commits;
+    }
+
+    // A single lane above HEAD, not a fork: unstaged builds on staged (the worktree is layered on
+    // top of the index), which builds on HEAD. When staged is absent, unstaged parents directly
+    // on HEAD instead.
+    let staged_commit = build_staged_pseudo_commit(path, &head_hash);
+    let unstaged_parent = staged_commit
+        .as_ref()
+        .map_or_else(|| head_hash.clone(), |c| c.commit_hash.clone());
+    let unstaged_commit = build_unstaged_pseudo_commit(path, &unstaged_parent);
+
+    let pseudo_commits = [unstaged_commit, staged_commit]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    if pseudo_commits.is_empty() {
+        return commits;
+    }
+
+    let mut pseudo_commits = Some(pseudo_commits);
+    let mut ret = Vec::with_capacity(commits.len() + 2);
+    for commit in commits {
+        if commit.commit_hash == head_hash {
+            if let Some(pseudo_commits) = pseudo_commits.take() {
+                ret.extend(pseudo_commits);
+            }
+        }
+        ret.push(commit);
+    }
+    ret
+}
+
+fn build_staged_pseudo_commit(path: &Path, parent_hash: &CommitHash) -> Option<Commit> {
+    let changes = get_staged_diff_summary(path);
+    (!changes.is_empty()).then(|| {
+        uncommitted_pseudo_commit(
+            path,
+            parent_hash,
+            STAGED_COMMIT_HASH.into(),
+            "Staged",
+            &changes,
+        )
+    })
+}
+
+fn build_unstaged_pseudo_commit(path: &Path, parent_hash: &CommitHash) -> Option<Commit> {
+    let changes = get_unstaged_diff_summary(path);
+    (!changes.is_empty()).then(|| {
+        uncommitted_pseudo_commit(
+            path,
+            parent_hash,
+            UNSTAGED_COMMIT_HASH.into(),
+            "Unstaged",
+            &changes,
+        )
+    })
+}
+
+fn uncommitted_pseudo_commit(
+    path: &Path,
+    parent_hash: &CommitHash,
+    commit_hash: CommitHash,
+    label: &str,
+    changes: &[FileChange],
+) -> Commit {
+    let (name, email) = current_git_identity(path);
+    let now = chrono::Local::now().fixed_offset();
+    let file_count = changes.len();
+    let noun = if file_count == 1 { "file" } else { "files" };
+    Commit {
+        commit_hash,
+        author_name: name.clone(),
+        author_email: email.clone(),
+        author_date: now,
+        committer_name: name,
+        committer_email: email,
+        committer_date: now,
+        subject: format!("{label} changes ({file_count} {noun})"),
+        body: String::new(),
+        parent_commit_hashes: vec![parent_hash.clone()],
+    }
+}
+
+fn current_git_identity(path: &Path) -> (String, String) {
+    let name = git_config_value(path, "user.name").unwrap_or_default();
+    let email = git_config_value(path, "user.email").unwrap_or_default();
+    (name, email)
+}
+
+fn git_config_value(path: &Path, key: &str) -> Option<String> {
+    let output = Command::new("git")
+        .arg("config")
+        .arg(key)
+        .current_dir(path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?;
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
 fn load_refs(path: &Path) -> (RefMap, Head) {
     let mut cmd = Command::new("git")
         .arg("show-ref")
@@ -834,11 +969,36 @@ pub enum FileChange {
 }
 
 pub fn get_diff_summary(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange> {
+    run_name_status_diff(
+        path,
+        &[
+            "diff",
+            "--name-status",
+            &format!("{}^", commit_hash.0),
+            &commit_hash.0,
+        ],
+    )
+}
+
+/// The index against `HEAD`: what `git commit` would record right now.
+pub fn get_staged_diff_summary(path: &Path) -> Vec<FileChange> {
+    run_name_status_diff(path, &["diff", "--cached", "--name-status"])
+}
+
+/// The worktree against the index, plus untracked files (which a plain `git diff` never shows).
+pub fn get_unstaged_diff_summary(path: &Path) -> Vec<FileChange> {
+    let mut changes = run_name_status_diff(path, &["diff", "--name-status"]);
+    changes.extend(
+        get_untracked_files(path)
+            .into_iter()
+            .map(|path| FileChange::Add { path }),
+    );
+    changes
+}
+
+fn run_name_status_diff(path: &Path, args: &[&str]) -> Vec<FileChange> {
     let mut cmd = Command::new("git")
-        .arg("diff")
-        .arg("--name-status")
-        .arg(format!("{}^", commit_hash.0))
-        .arg(&commit_hash.0)
+        .args(args)
         .current_dir(path)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -876,6 +1036,38 @@ pub fn get_diff_summary(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange
     cmd.wait().unwrap();
 
     changes
+}
+
+/// Untracked file paths, one per line of `git status --porcelain`'s `??` entries.
+fn get_untracked_files(path: &Path) -> Vec<String> {
+    let mut cmd = Command::new("git")
+        .arg("status")
+        .arg("--porcelain")
+        .arg("--untracked-files=all")
+        .arg("-z")
+        .current_dir(path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    let stdout = cmd.stdout.take().expect("failed to open stdout");
+
+    let reader = BufReader::new(stdout);
+
+    let mut paths = Vec::new();
+
+    for bytes in reader.split(b'\0') {
+        let bytes = bytes.unwrap();
+        let entry = String::from_utf8_lossy(&bytes);
+        if let Some(path) = entry.strip_prefix("?? ") {
+            paths.push(path.to_string());
+        }
+    }
+
+    cmd.wait().unwrap();
+
+    paths
 }
 
 pub fn get_initial_commit_additions(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange> {

@@ -61,6 +61,18 @@ impl<'a> GitRepository<'a> {
         self.run(&["commit", "-m", message], &datetime_str);
     }
 
+    /// Writes and stages a file without committing it, leaving it in the index only.
+    pub(crate) fn stage_file(&self, file_name: &str, content: &str) {
+        std::fs::write(self.path.join(file_name), content).unwrap();
+        self.run(&["add", file_name], "");
+    }
+
+    /// Writes a file without staging it: an unstaged modification if `file_name` is tracked,
+    /// otherwise an untracked file.
+    pub(crate) fn write_file(&self, file_name: &str, content: &str) {
+        std::fs::write(self.path.join(file_name), content).unwrap();
+    }
+
     pub(crate) fn checkout(&self, branch_name: &str) {
         self.run(&["checkout", branch_name], "");
     }

@@ -29,7 +29,14 @@ fn mailmap_enabled_rewrites_author_and_committer() -> TestResult {
     git.commit("commit", "2024-01-01");
     write_mailmap(repo_path);
 
-    let repository = Repository::load(repo_path, git::SortCommit::Chronological, None, true, &[])?;
+    let repository = Repository::load(
+        repo_path,
+        git::SortCommit::Chronological,
+        None,
+        true,
+        &[],
+        false,
+    )?;
     let commits = repository.all_commits();
     let commit = commits.first().unwrap();
 
@@ -51,7 +58,14 @@ fn mailmap_disabled_keeps_raw_identity() -> TestResult {
     git.commit("commit", "2024-01-01");
     write_mailmap(repo_path);
 
-    let repository = Repository::load(repo_path, git::SortCommit::Chronological, None, false, &[])?;
+    let repository = Repository::load(
+        repo_path,
+        git::SortCommit::Chronological,
+        None,
+        false,
+        &[],
+        false,
+    )?;
     let commits = repository.all_commits();
     let commit = commits.first().unwrap();
 
@@ -72,7 +86,14 @@ fn mailmap_enabled_without_mailmap_file_is_a_no_op() -> TestResult {
     git.init();
     git.commit("commit", "2024-01-01");
 
-    let repository = Repository::load(repo_path, git::SortCommit::Chronological, None, true, &[])?;
+    let repository = Repository::load(
+        repo_path,
+        git::SortCommit::Chronological,
+        None,
+        true,
+        &[],
+        false,
+    )?;
     let commits = repository.all_commits();
     let commit = commits.first().unwrap();
 

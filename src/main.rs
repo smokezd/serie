@@ -29,6 +29,10 @@ mod test_git;
 mod revspec_tests;
 
 #[cfg(test)]
+#[path = "tests/uncommitted.rs"]
+mod uncommitted_tests;
+
+#[cfg(test)]
 #[path = "tests/graph_text.rs"]
 mod graph_text_tests;
 
@@ -70,6 +74,14 @@ struct Args {
     /// Revisions to render, passed to `git log` as-is [default: all branches, remotes and tags]
     #[arg(value_name = "REVSPEC", num_args = 0..)]
     revspec: Vec<String>,
+
+    /// Show local uncommitted changes as staged/unstaged rows above HEAD
+    #[arg(long, overrides_with = "no_uncommitted")]
+    uncommitted: bool,
+
+    /// Hide local uncommitted changes, overriding `uncommitted` in the config
+    #[arg(long = "no-uncommitted", overrides_with = "uncommitted")]
+    no_uncommitted: bool,
 }
 
 /// `HEAD` is spelled in upper case in git, and only resolves in lower case on case-insensitive
@@ -269,6 +281,13 @@ fn main() -> Result<()> {
         .into();
     let mailmap = core_config.git.mailmap;
     let revspec = normalize_revspec(args.revspec);
+    // `overrides_with` leaves exactly one of the pair set, so whichever flag was given last wins
+    // over the config, and neither falls through to it.
+    let include_uncommitted = match (args.uncommitted, args.no_uncommitted) {
+        (true, _) => true,
+        (_, true) => false,
+        _ => core_config.option.uncommitted.unwrap_or(false),
+    };
 
     let graph_color_set = color::GraphColorSet::new(&graph_config.color);
 
@@ -288,11 +307,17 @@ fn main() -> Result<()> {
     // Every failure inside the loop has to leave through `break`, since a refresh runs it again
     // with the terminal already initialized and `?` would skip `ratatui::restore()`.
     let ret: Result<()> = loop {
-        let repository =
-            match git::Repository::load(Path::new("."), order, max_count, mailmap, &revspec) {
-                Ok(repository) => repository,
-                Err(e) => break Err(e),
-            };
+        let repository = match git::Repository::load(
+            Path::new("."),
+            order,
+            max_count,
+            mailmap,
+            &revspec,
+            include_uncommitted,
+        ) {
+            Ok(repository) => repository,
+            Err(e) => break Err(e),
+        };
 
         let graph = graph::calc_graph(&repository);
 
