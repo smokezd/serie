@@ -165,7 +165,7 @@ impl<'a> DetailView<'a> {
             UserEvent::HelpToggle => {
                 self.tx.send(AppEvent::OpenHelp);
             }
-            UserEvent::Confirm | UserEvent::Cancel | UserEvent::Close => {
+            UserEvent::Confirm | UserEvent::Cancel | UserEvent::Close | UserEvent::Quit => {
                 self.tx.send(AppEvent::CloseDetail);
             }
             UserEvent::Refresh => {
