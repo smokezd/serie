@@ -728,6 +728,15 @@
         },
         "full_copy": {
           "$ref": "#/definitions/keybindArray"
+        },
+        "hunkdiff_show": {
+          "$ref": "#/definitions/keybindArray"
+        },
+        "hunkdiff_diff_to_head": {
+          "$ref": "#/definitions/keybindArray"
+        },
+        "hunkdiff_diff_through_worktree": {
+          "$ref": "#/definitions/keybindArray"
         }
       },
       "patternProperties": {

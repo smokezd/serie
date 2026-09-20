@@ -42,6 +42,10 @@ refresh = ["shift-r"]
 
 user_command_1 = ["d"]
 
+hunkdiff_show = ["shift-d"]
+hunkdiff_diff_to_head = ["r"]
+hunkdiff_diff_through_worktree = ["w"]
+
 # copy part of information, ex: copy the short commit hash not all
 short_copy = ["c"]
 full_copy = ["shift-c"]

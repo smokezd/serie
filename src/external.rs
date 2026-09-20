@@ -105,15 +105,20 @@ pub fn exec_user_command(params: ExternalCommandParameters) -> Result<String, St
 }
 
 pub fn exec_user_command_suspend(params: ExternalCommandParameters) -> Result<(), String> {
-    let command = build_user_command(&params);
+    exec_command_suspend(&build_user_command(&params))
+}
 
-    let output = Command::new(&command[0])
+/// Runs an argv built directly by the caller (no `{{marker}}` templating), inheriting the
+/// terminal so the child can take it over. Used for the hardcoded `hunkdiff` integration, whose
+/// arguments are computed in Rust rather than substituted into a user-configured template.
+pub fn exec_command_suspend(command: &[String]) -> Result<(), String> {
+    let status = Command::new(&command[0])
         .args(&command[1..])
         .status()
         .map_err(|e| format!("Failed to execute command: {e:?}"))?;
 
-    if !output.success() {
-        let msg = format!("Command exited with non-zero status: {output}");
+    if !status.success() {
+        let msg = format!("Command exited with non-zero status: {status}");
         return Err(msg);
     }
 

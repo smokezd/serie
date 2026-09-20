@@ -17,11 +17,15 @@ use crate::{
     check::GraphDisplay,
     color::{ColorTheme, GraphColorSet},
     config::{CoreConfig, CursorType, UiConfig, UserCommand, UserCommandType},
-    event::{AppEvent, EventController, UserEvent, UserEventWithCount},
+    event::{AppEvent, EventController, HunkdiffMode, UserEvent, UserEventWithCount},
     external::{
-        copy_to_clipboard, exec_user_command, exec_user_command_suspend, ExternalCommandParameters,
+        copy_to_clipboard, exec_command_suspend, exec_user_command, exec_user_command_suspend,
+        ExternalCommandParameters,
     },
-    git::{Commit, CommitHash, FileChange, Head, MergeBase, Ref, Repository},
+    git::{
+        Commit, CommitHash, FileChange, Head, MergeBase, Ref, Repository, STAGED_COMMIT_HASH,
+        UNSTAGED_COMMIT_HASH,
+    },
     graph::{CellWidthType, Graph, GraphRows},
     keybind::KeyBind,
     protocol::ImageProtocol,
@@ -324,6 +328,14 @@ impl App<'_> {
                 AppEvent::OpenUserCommand(n) => {
                     self.clear_image(Some(terminal))?;
                     self.open_user_command(n, Some(terminal));
+                }
+                AppEvent::OpenHunkdiff(mode) => {
+                    self.clear_image(Some(terminal))?;
+                    self.open_hunkdiff(mode);
+                    // hunkdiff left the alternate screen behind it, and the one resuming put back
+                    // is empty, so the next frame has to repaint every cell rather than diff
+                    // against the buffer from before the suspend.
+                    terminal.clear()?;
                 }
                 AppEvent::CloseUserCommand => {
                     terminal.clear()?;
@@ -725,6 +737,27 @@ impl App<'_> {
         }
     }
 
+    /// Runs `hunkdiff` for the selected row, with the argv hardcoded per `mode` rather than built
+    /// from a user-configured template: the staged/unstaged pseudo-rows have no real revision to
+    /// substitute in, so the command has to be picked in code instead.
+    fn open_hunkdiff(&mut self, mode: HunkdiffMode) {
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => view.as_list_state(),
+            View::Detail(ref mut view) => view.as_list_state(),
+            _ => return,
+        };
+        let commit_hash = commit_list_state.selected_commit_hash().clone();
+        let command = hunkdiff_command(mode, &commit_hash);
+
+        self.ec.suspend();
+        let exec_result = exec_command_suspend(&command);
+        self.ec.resume();
+
+        if let Err(err) = exec_result {
+            self.ec.send(AppEvent::NotifyError(err));
+        }
+    }
+
     fn close_user_command(&mut self) {
         if let View::UserCommand(ref mut view) = self.view {
             let commit_list_state = view.take_list_state();
@@ -895,6 +928,38 @@ fn status_line_with_metadata(
     ])
 }
 
+/// The `hunkdiff` argv for `mode`, special-cased for the staged/unstaged pseudo-commits: neither
+/// is a real revision, so `hunkdiff diff [--staged]` (no target) stands in for it directly rather
+/// than substituting a hash `hunkdiff` could not resolve.
+fn hunkdiff_command(mode: HunkdiffMode, commit_hash: &CommitHash) -> Vec<String> {
+    let hash = commit_hash.as_str();
+
+    if hash == STAGED_COMMIT_HASH {
+        // "Show" and "diff to HEAD" both mean the staged snapshot itself; "through worktree"
+        // means whatever is layered on top of it, i.e. the unstaged diff.
+        return match mode {
+            HunkdiffMode::Show | HunkdiffMode::DiffToHead => {
+                vec!["hunkdiff".into(), "diff".into(), "--staged".into()]
+            }
+            HunkdiffMode::DiffThroughWorktree => vec!["hunkdiff".into(), "diff".into()],
+        };
+    }
+    if hash == UNSTAGED_COMMIT_HASH {
+        // Nothing sits beyond the worktree, so every mode shows the same worktree diff.
+        return vec!["hunkdiff".into(), "diff".into()];
+    }
+
+    match mode {
+        HunkdiffMode::Show => vec!["hunkdiff".into(), "show".into(), hash.into()],
+        HunkdiffMode::DiffToHead => {
+            vec!["hunkdiff".into(), "diff".into(), format!("{hash}..HEAD")]
+        }
+        HunkdiffMode::DiffThroughWorktree => {
+            vec!["hunkdiff".into(), "diff".into(), hash.into()]
+        }
+    }
+}
+
 fn selected_commit_details(
     repository: &Repository,
     commit_list_state: &CommitListState,
@@ -1009,6 +1074,57 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+
+    #[test]
+    fn hunkdiff_command_targets_a_real_commit_by_hash() {
+        let hash: CommitHash = "abc123".into();
+
+        assert_eq!(
+            hunkdiff_command(HunkdiffMode::Show, &hash),
+            ["hunkdiff", "show", "abc123"]
+        );
+        assert_eq!(
+            hunkdiff_command(HunkdiffMode::DiffToHead, &hash),
+            ["hunkdiff", "diff", "abc123..HEAD"]
+        );
+        assert_eq!(
+            hunkdiff_command(HunkdiffMode::DiffThroughWorktree, &hash),
+            ["hunkdiff", "diff", "abc123"]
+        );
+    }
+
+    #[test]
+    fn hunkdiff_command_falls_back_to_staged_diff_for_the_staged_pseudo_commit() {
+        let hash: CommitHash = STAGED_COMMIT_HASH.into();
+
+        // "show" and "diff to HEAD" both mean the staged snapshot itself.
+        assert_eq!(
+            hunkdiff_command(HunkdiffMode::Show, &hash),
+            ["hunkdiff", "diff", "--staged"]
+        );
+        assert_eq!(
+            hunkdiff_command(HunkdiffMode::DiffToHead, &hash),
+            ["hunkdiff", "diff", "--staged"]
+        );
+        // "through worktree" means what's layered on top: the unstaged diff.
+        assert_eq!(
+            hunkdiff_command(HunkdiffMode::DiffThroughWorktree, &hash),
+            ["hunkdiff", "diff"]
+        );
+    }
+
+    #[test]
+    fn hunkdiff_command_always_shows_the_worktree_diff_for_the_unstaged_pseudo_commit() {
+        let hash: CommitHash = UNSTAGED_COMMIT_HASH.into();
+
+        for mode in [
+            HunkdiffMode::Show,
+            HunkdiffMode::DiffToHead,
+            HunkdiffMode::DiffThroughWorktree,
+        ] {
+            assert_eq!(hunkdiff_command(mode, &hash), ["hunkdiff", "diff"]);
+        }
+    }
 
     #[rustfmt::skip]
     #[rstest]

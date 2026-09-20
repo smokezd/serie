@@ -260,6 +260,9 @@ fn build_lines(
         (vec![UserEvent::Refresh], "Refresh".into()),
         (vec![UserEvent::ShortCopy], "Copy commit short hash".into()),
         (vec![UserEvent::FullCopy], "Copy commit hash".into()),
+        (vec![UserEvent::HunkdiffShow], "Hunkdiff: show".into()),
+        (vec![UserEvent::HunkdiffDiffToHead], "Hunkdiff: diff to HEAD".into()),
+        (vec![UserEvent::HunkdiffDiffThroughWorktree], "Hunkdiff: diff through worktree".into()),
     ];
     list_helps.extend(user_command_help_items.clone());
     let (list_key_lines, list_value_lines) = build_block_lines("Commit List:", list_helps, color_theme, keybind);
@@ -283,6 +286,9 @@ fn build_lines(
         (vec![UserEvent::Refresh], "Refresh".into()),
         (vec![UserEvent::ShortCopy], "Copy commit short hash".into()),
         (vec![UserEvent::FullCopy], "Copy commit hash".into()),
+        (vec![UserEvent::HunkdiffShow], "Hunkdiff: show".into()),
+        (vec![UserEvent::HunkdiffDiffToHead], "Hunkdiff: diff to HEAD".into()),
+        (vec![UserEvent::HunkdiffDiffThroughWorktree], "Hunkdiff: diff through worktree".into()),
     ];
     detail_helps.extend(user_command_help_items.clone());
     let (detail_key_lines, detail_value_lines) = build_block_lines("Commit Detail:", detail_helps, color_theme, keybind);

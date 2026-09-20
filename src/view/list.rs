@@ -5,7 +5,7 @@ use ratatui::{crossterm::event::KeyEvent, layout::Rect, Frame};
 use crate::{
     app::AppContext,
     config::UserListColumnType,
-    event::{AppEvent, Sender, UserEvent, UserEventWithCount},
+    event::{AppEvent, HunkdiffMode, Sender, UserEvent, UserEventWithCount},
     git::CommitHash,
     view::{ListRefreshViewContext, RefreshViewContext},
     widget::commit_list::{
@@ -163,6 +163,17 @@ impl<'a> ListView<'a> {
                 }
                 UserEvent::UserCommand(n) => {
                     self.tx.send(AppEvent::OpenUserCommand(n));
+                }
+                UserEvent::HunkdiffShow => {
+                    self.tx.send(AppEvent::OpenHunkdiff(HunkdiffMode::Show));
+                }
+                UserEvent::HunkdiffDiffToHead => {
+                    self.tx
+                        .send(AppEvent::OpenHunkdiff(HunkdiffMode::DiffToHead));
+                }
+                UserEvent::HunkdiffDiffThroughWorktree => {
+                    self.tx
+                        .send(AppEvent::OpenHunkdiff(HunkdiffMode::DiffThroughWorktree));
                 }
                 UserEvent::HelpToggle => {
                     self.tx.send(AppEvent::OpenHelp);

@@ -15,6 +15,20 @@ use serde::{
 
 use crate::view::RefreshViewContext;
 
+/// Which of the three hardcoded `hunkdiff` invocations to run; see `UserEvent::HunkdiffShow` and
+/// its siblings. Hardcoded rather than user-command config so the argv can be built specially for
+/// the staged/unstaged pseudo-commits, which have no real revision to hand `hunkdiff`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HunkdiffMode {
+    /// Review the commit (or the staged/unstaged snapshot) on its own.
+    Show,
+    /// Changes from the commit up to `HEAD`. Has no meaning for staged/unstaged, which are ahead
+    /// of `HEAD`, not behind it; those fall back to the same thing as `Show`.
+    DiffToHead,
+    /// Cumulative changes from the commit through the current worktree.
+    DiffThroughWorktree,
+}
+
 #[derive(Debug)]
 pub enum AppEvent {
     Key(KeyEvent),
@@ -24,6 +38,7 @@ pub enum AppEvent {
     CloseDetail,
     OpenUserCommand(usize),
     CloseUserCommand,
+    OpenHunkdiff(HunkdiffMode),
     OpenRefs,
     CloseRefs,
     OpenHelp,
@@ -231,6 +246,9 @@ pub enum UserEvent {
     RefList,
     Search,
     UserCommand(usize),
+    HunkdiffShow,
+    HunkdiffDiffToHead,
+    HunkdiffDiffThroughWorktree,
     SearchTargetToggle,
     IgnoreCaseToggle,
     FuzzyToggle,
@@ -301,6 +319,11 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "confirm" => Ok(UserEvent::Confirm),
                         "ref_list" | "ref_list_toggle" => Ok(UserEvent::RefList),
                         "search" => Ok(UserEvent::Search),
+                        "hunkdiff_show" => Ok(UserEvent::HunkdiffShow),
+                        "hunkdiff_diff_to_head" => Ok(UserEvent::HunkdiffDiffToHead),
+                        "hunkdiff_diff_through_worktree" => {
+                            Ok(UserEvent::HunkdiffDiffThroughWorktree)
+                        }
                         "search_target_toggle" => Ok(UserEvent::SearchTargetToggle),
                         "ignore_case_toggle" => Ok(UserEvent::IgnoreCaseToggle),
                         "fuzzy_toggle" => Ok(UserEvent::FuzzyToggle),

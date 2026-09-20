@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     app::AppContext,
-    event::{AppEvent, Sender, UserEvent, UserEventWithCount},
+    event::{AppEvent, HunkdiffMode, Sender, UserEvent, UserEventWithCount},
     git::{Commit, FileChange, Ref, Repository},
     view::{ListRefreshViewContext, RefreshViewContext},
     widget::{
@@ -135,6 +135,17 @@ impl<'a> DetailView<'a> {
             }
             UserEvent::UserCommand(n) => {
                 self.tx.send(AppEvent::OpenUserCommand(n));
+            }
+            UserEvent::HunkdiffShow => {
+                self.tx.send(AppEvent::OpenHunkdiff(HunkdiffMode::Show));
+            }
+            UserEvent::HunkdiffDiffToHead => {
+                self.tx
+                    .send(AppEvent::OpenHunkdiff(HunkdiffMode::DiffToHead));
+            }
+            UserEvent::HunkdiffDiffThroughWorktree => {
+                self.tx
+                    .send(AppEvent::OpenHunkdiff(HunkdiffMode::DiffThroughWorktree));
             }
             UserEvent::DetailHeightIncrease => {
                 self.resize_detail(count as i32);
