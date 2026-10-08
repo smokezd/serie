@@ -737,7 +737,7 @@ impl App<'_> {
         }
     }
 
-    /// Runs `hunkdiff` for the selected row, with the argv hardcoded per `mode` rather than built
+    /// Runs `hunk` for the selected row, with the argv hardcoded per `mode` rather than built
     /// from a user-configured template: the staged/unstaged pseudo-rows have no real revision to
     /// substitute in, so the command has to be picked in code instead.
     fn open_hunkdiff(&mut self, mode: HunkdiffMode) {
@@ -928,9 +928,9 @@ fn status_line_with_metadata(
     ])
 }
 
-/// The `hunkdiff` argv for `mode`, special-cased for the staged/unstaged pseudo-commits: neither
-/// is a real revision, so `hunkdiff diff [--staged]` (no target) stands in for it directly rather
-/// than substituting a hash `hunkdiff` could not resolve.
+/// The `hunk` argv for `mode`, special-cased for the staged/unstaged pseudo-commits: neither
+/// is a real revision, so `hunk diff [--staged]` (no target) stands in for it directly rather
+/// than substituting a hash `hunk` could not resolve.
 fn hunkdiff_command(mode: HunkdiffMode, commit_hash: &CommitHash) -> Vec<String> {
     let hash = commit_hash.as_str();
 
@@ -939,23 +939,23 @@ fn hunkdiff_command(mode: HunkdiffMode, commit_hash: &CommitHash) -> Vec<String>
         // means whatever is layered on top of it, i.e. the unstaged diff.
         return match mode {
             HunkdiffMode::Show | HunkdiffMode::DiffToHead => {
-                vec!["hunkdiff".into(), "diff".into(), "--staged".into()]
+                vec!["hunk".into(), "diff".into(), "--staged".into()]
             }
-            HunkdiffMode::DiffThroughWorktree => vec!["hunkdiff".into(), "diff".into()],
+            HunkdiffMode::DiffThroughWorktree => vec!["hunk".into(), "diff".into()],
         };
     }
     if hash == UNSTAGED_COMMIT_HASH {
         // Nothing sits beyond the worktree, so every mode shows the same worktree diff.
-        return vec!["hunkdiff".into(), "diff".into()];
+        return vec!["hunk".into(), "diff".into()];
     }
 
     match mode {
-        HunkdiffMode::Show => vec!["hunkdiff".into(), "show".into(), hash.into()],
+        HunkdiffMode::Show => vec!["hunk".into(), "show".into(), hash.into()],
         HunkdiffMode::DiffToHead => {
-            vec!["hunkdiff".into(), "diff".into(), format!("{hash}..HEAD")]
+            vec!["hunk".into(), "diff".into(), format!("{hash}..HEAD")]
         }
         HunkdiffMode::DiffThroughWorktree => {
-            vec!["hunkdiff".into(), "diff".into(), hash.into()]
+            vec!["hunk".into(), "diff".into(), hash.into()]
         }
     }
 }
@@ -1081,15 +1081,15 @@ mod tests {
 
         assert_eq!(
             hunkdiff_command(HunkdiffMode::Show, &hash),
-            ["hunkdiff", "show", "abc123"]
+            ["hunk", "show", "abc123"]
         );
         assert_eq!(
             hunkdiff_command(HunkdiffMode::DiffToHead, &hash),
-            ["hunkdiff", "diff", "abc123..HEAD"]
+            ["hunk", "diff", "abc123..HEAD"]
         );
         assert_eq!(
             hunkdiff_command(HunkdiffMode::DiffThroughWorktree, &hash),
-            ["hunkdiff", "diff", "abc123"]
+            ["hunk", "diff", "abc123"]
         );
     }
 
@@ -1100,16 +1100,16 @@ mod tests {
         // "show" and "diff to HEAD" both mean the staged snapshot itself.
         assert_eq!(
             hunkdiff_command(HunkdiffMode::Show, &hash),
-            ["hunkdiff", "diff", "--staged"]
+            ["hunk", "diff", "--staged"]
         );
         assert_eq!(
             hunkdiff_command(HunkdiffMode::DiffToHead, &hash),
-            ["hunkdiff", "diff", "--staged"]
+            ["hunk", "diff", "--staged"]
         );
         // "through worktree" means what's layered on top: the unstaged diff.
         assert_eq!(
             hunkdiff_command(HunkdiffMode::DiffThroughWorktree, &hash),
-            ["hunkdiff", "diff"]
+            ["hunk", "diff"]
         );
     }
 
@@ -1122,7 +1122,7 @@ mod tests {
             HunkdiffMode::DiffToHead,
             HunkdiffMode::DiffThroughWorktree,
         ] {
-            assert_eq!(hunkdiff_command(mode, &hash), ["hunkdiff", "diff"]);
+            assert_eq!(hunkdiff_command(mode, &hash), ["hunk", "diff"]);
         }
     }
 

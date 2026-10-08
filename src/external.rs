@@ -109,7 +109,7 @@ pub fn exec_user_command_suspend(params: ExternalCommandParameters) -> Result<()
 }
 
 /// Runs an argv built directly by the caller (no `{{marker}}` templating), inheriting the
-/// terminal so the child can take it over. Used for the hardcoded `hunkdiff` integration, whose
+/// terminal so the child can take it over. Used for the hardcoded `hunk` integration, whose
 /// arguments are computed in Rust rather than substituted into a user-configured template.
 pub fn exec_command_suspend(command: &[String]) -> Result<(), String> {
     let status = Command::new(&command[0])

@@ -15,9 +15,9 @@ use serde::{
 
 use crate::view::RefreshViewContext;
 
-/// Which of the three hardcoded `hunkdiff` invocations to run; see `UserEvent::HunkdiffShow` and
+/// Which of the three hardcoded `hunk` invocations to run; see `UserEvent::HunkdiffShow` and
 /// its siblings. Hardcoded rather than user-command config so the argv can be built specially for
-/// the staged/unstaged pseudo-commits, which have no real revision to hand `hunkdiff`.
+/// the staged/unstaged pseudo-commits, which have no real revision to hand `hunk`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HunkdiffMode {
     /// Review the commit (or the staged/unstaged snapshot) on its own.
