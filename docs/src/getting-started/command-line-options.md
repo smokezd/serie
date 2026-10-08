@@ -102,6 +102,28 @@ under [`<REVSPEC>`](#revspec). On by default; `--no-auto-upstream` renders the r
 given. Whichever of the two comes last wins, and either one overrides `auto_upstream` in the config
 file.
 
+## --auto-refresh, --no-auto-refresh
+
+Whether to refresh when the local repository changes. On by default: every 20 seconds `serie`
+checks the refs, where HEAD points and, with `--uncommitted`, the worktree status, and refreshes
+when any of them changed since the last load. The selection and the open pane are kept, as with the
+`refresh` keybinding. A refresh is held back while a search is being typed, over the help, and over
+a user command's output (refreshing one runs it again), and happens on the next check after that.
+
+`--no-auto-refresh` refreshes only on request. Whichever of the two comes last wins, and either one
+overrides `auto_refresh` in the config file.
+
+## --auto-fetch, --no-auto-fetch
+
+Whether to fetch remote branches in the background. On by default: every 60 seconds `serie` runs
+`git fetch` for the remote branches the revspec names (`serie origin/main`) and the upstreams it
+brings in for local branches (see [`--auto-upstream`](#--auto-upstream---no-auto-upstream)), and
+refreshes when any of them moved. Without a revspec nothing is fetched.
+
+A fetch never prompts: it fails quietly when credentials would be needed, and is tried again on the
+next round. `--no-auto-fetch` turns it off; whichever of the two comes last wins, and either one
+overrides `auto_fetch` in the config file.
+
 ## -n, --max-count \<NUMBER\>
 
 Maximum number of commits to render.

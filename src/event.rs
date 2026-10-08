@@ -53,6 +53,8 @@ pub enum AppEvent {
         value: String,
     },
     Refresh(RefreshViewContext),
+    /// The repository changed underneath the view; see `watch::Watcher`.
+    AutoRefresh,
     ClearStatusLine,
     UpdateStatusInput {
         message: String,

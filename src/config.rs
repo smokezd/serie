@@ -133,6 +133,8 @@ pub struct CoreOptionConfig {
     pub initial_selection: Option<InitialSelection>,
     pub uncommitted: Option<bool>,
     pub auto_upstream: Option<bool>,
+    pub auto_refresh: Option<bool>,
+    pub auto_fetch: Option<bool>,
 }
 
 #[optional(derives = [Deserialize])]
@@ -453,6 +455,8 @@ mod tests {
                     initial_selection: None,
                     uncommitted: None,
                     auto_upstream: None,
+                    auto_refresh: None,
+                    auto_fetch: None,
                 },
                 git: CoreGitConfig { mailmap: false },
                 search: CoreSearchConfig {
@@ -542,6 +546,8 @@ mod tests {
             initial_selection = "head"
             uncommitted = true
             auto_upstream = false
+            auto_refresh = false
+            auto_fetch = false
             [core.git]
             mailmap = true
             [core.search]
@@ -589,6 +595,8 @@ mod tests {
                     initial_selection: Some(InitialSelection::Head),
                     uncommitted: Some(true),
                     auto_upstream: Some(false),
+                    auto_refresh: Some(false),
+                    auto_fetch: Some(false),
                 },
                 git: CoreGitConfig { mailmap: true },
                 search: CoreSearchConfig {
@@ -704,6 +712,8 @@ mod tests {
                     initial_selection: None,
                     uncommitted: None,
                     auto_upstream: None,
+                    auto_refresh: None,
+                    auto_fetch: None,
                 },
                 git: CoreGitConfig { mailmap: false },
                 search: CoreSearchConfig {

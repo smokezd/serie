@@ -577,3 +577,23 @@ fn each_auto_upstream_flag_sets_only_itself_and_the_last_wins() {
     let on = Args::try_parse_from(["serie", "--no-auto-upstream", "--auto-upstream"]).unwrap();
     assert!(on.auto_upstream && !on.no_auto_upstream);
 }
+
+#[test]
+fn remote_targets_are_typed_remotes_and_brought_in_upstreams() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    init_repository_with_upstreams(dir.path());
+
+    let typed_and_upstream = load(dir.path(), &["origin/feature", "master"])?;
+    assert_eq!(
+        typed_and_upstream.remote_targets(),
+        ["origin/feature", "origin/master"]
+    );
+
+    let without_upstream = load_with_upstream(dir.path(), &["master"], false)?;
+    assert!(without_upstream.remote_targets().is_empty());
+
+    // The default view shows every remote and never fetches on its own.
+    let unscoped = load(dir.path(), &[])?;
+    assert!(unscoped.remote_targets().is_empty());
+    Ok(())
+}

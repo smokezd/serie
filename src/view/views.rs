@@ -154,6 +154,17 @@ impl<'a> View<'a> {
         View::Help(Box::new(HelpView::new(before, ctx, tx)))
     }
 
+    /// Whether a refresh nobody asked for may happen now. Not while typing a search, which a
+    /// reload would interrupt, nor over the help or a user command's output: the help has no list
+    /// state to restore, and refreshing a user command runs it again.
+    pub fn accepts_auto_refresh(&self) -> bool {
+        match self {
+            View::List(view) => view.accepts_auto_refresh(),
+            View::Detail(_) | View::Refs(_) => true,
+            View::Default | View::UserCommand(_) | View::Help(_) => false,
+        }
+    }
+
     pub fn refresh(&mut self) {
         match self {
             View::Default => {}

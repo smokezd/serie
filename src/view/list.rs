@@ -376,6 +376,13 @@ impl<'a> ListView<'a> {
         self.tx.send(AppEvent::CopyToClipboard { name, value });
     }
 
+    pub fn accepts_auto_refresh(&self) -> bool {
+        !matches!(
+            self.as_list_state().search_state(),
+            SearchState::Searching { .. }
+        )
+    }
+
     pub fn refresh(&self) {
         let list_state = self.as_list_state();
         let list_context = ListRefreshViewContext::from(list_state);

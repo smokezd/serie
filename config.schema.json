@@ -72,6 +72,16 @@
               "type": "boolean",
               "description": "When the revspec names a local branch (or HEAD on a branch), also render its upstream remote branch. The command line arguments --auto-upstream and --no-auto-upstream take precedence.",
               "default": true
+            },
+            "auto_refresh": {
+              "type": "boolean",
+              "description": "Check the local repository every 20 seconds and refresh when it has changed. The command line arguments --auto-refresh and --no-auto-refresh take precedence.",
+              "default": true
+            },
+            "auto_fetch": {
+              "type": "boolean",
+              "description": "Every 60 seconds, fetch the remote branches the revspec names or brings in as upstreams, and refresh when they moved. Never fetches without a revspec. The command line arguments --auto-fetch and --no-auto-fetch take precedence.",
+              "default": true
             }
           },
           "additionalProperties": false

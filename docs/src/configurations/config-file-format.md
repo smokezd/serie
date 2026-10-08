@@ -10,6 +10,8 @@ graph_width = "auto"
 graph_style = "rounded"
 initial_selection = "latest"
 auto_upstream = true
+auto_refresh = true
+auto_fetch = true
 
 [core.git]
 mailmap = false

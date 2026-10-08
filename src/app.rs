@@ -389,6 +389,11 @@ impl App<'_> {
                     let request = RefreshRequest { context };
                     return Ok(Ret::Refresh(request));
                 }
+                AppEvent::AutoRefresh => {
+                    if self.view.accepts_auto_refresh() {
+                        self.view.refresh();
+                    }
+                }
                 AppEvent::ClearStatusLine => {
                     self.clear_status_line();
                 }

@@ -10,6 +10,7 @@ mod keybind;
 mod protocol;
 mod search;
 mod view;
+mod watch;
 mod widget;
 
 #[cfg(test)]
@@ -90,6 +91,22 @@ struct Args {
     /// Render only the revspec as given, overriding `auto_upstream` in the config
     #[arg(long = "no-auto-upstream", overrides_with = "auto_upstream")]
     no_auto_upstream: bool,
+
+    /// Refresh when the local repository changes, checked every 20 seconds [default: on]
+    #[arg(long, overrides_with = "no_auto_refresh")]
+    auto_refresh: bool,
+
+    /// Refresh only on request, overriding `auto_refresh` in the config
+    #[arg(long = "no-auto-refresh", overrides_with = "auto_refresh")]
+    no_auto_refresh: bool,
+
+    /// Fetch the remote branches in the revspec every 60 seconds [default: on]
+    #[arg(long, overrides_with = "no_auto_fetch")]
+    auto_fetch: bool,
+
+    /// Never fetch in the background, overriding `auto_fetch` in the config
+    #[arg(long = "no-auto-fetch", overrides_with = "auto_fetch")]
+    no_auto_fetch: bool,
 }
 
 /// `HEAD` is spelled in upper case in git, and only resolves in lower case on case-insensitive
@@ -301,6 +318,16 @@ fn main() -> Result<()> {
         (_, true) => false,
         _ => core_config.option.auto_upstream.unwrap_or(true),
     };
+    let auto_refresh = match (args.auto_refresh, args.no_auto_refresh) {
+        (true, _) => true,
+        (_, true) => false,
+        _ => core_config.option.auto_refresh.unwrap_or(true),
+    };
+    let auto_fetch = match (args.auto_fetch, args.no_auto_fetch) {
+        (true, _) => true,
+        (_, true) => false,
+        _ => core_config.option.auto_fetch.unwrap_or(true),
+    };
 
     let graph_color_set = color::GraphColorSet::new(&graph_config.color);
 
@@ -314,12 +341,20 @@ fn main() -> Result<()> {
     });
 
     let ec = event::EventController::init();
+    let watcher = watch::Watcher::start(
+        Path::new("."),
+        include_uncommitted,
+        auto_refresh,
+        auto_fetch,
+        ec.sender(),
+    );
     let mut refresh_view_context: Option<view::RefreshViewContext> = None;
     let mut terminal = None;
 
     // Every failure inside the loop has to leave through `break`, since a refresh runs it again
     // with the terminal already initialized and `?` would skip `ratatui::restore()`.
     let ret: Result<()> = loop {
+        let fingerprint = watcher.fingerprint();
         let repository = match git::Repository::load(
             Path::new("."),
             order,
@@ -332,6 +367,7 @@ fn main() -> Result<()> {
             Ok(repository) => repository,
             Err(e) => break Err(e),
         };
+        watcher.loaded(fingerprint, repository.remote_targets().to_vec());
 
         let graph = graph::calc_graph(&repository);
 

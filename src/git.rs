@@ -150,6 +150,9 @@ pub struct Repository {
     // The commit each plain revision in the revspec resolves to, in the order given. Empty
     // unless the revspec named two or more of them; see `plain_revisions`.
     revspec_tips: Vec<CommitHash>,
+    // The remote branches the revspec scopes the view to, typed or brought in as an upstream;
+    // see `remote_targets`.
+    remote_targets: Vec<String>,
 }
 
 impl Repository {
@@ -178,17 +181,18 @@ impl Repository {
         };
         // Only what `git log` walks is widened: the merge base, the tips and the status line label
         // all keep reading the revspec as typed, so `serie master topic` still names two revisions.
+        let remotes: Vec<&str> = ref_map
+            .values()
+            .flatten()
+            .filter(|r| matches!(r, Ref::RemoteBranch { .. }))
+            .map(Ref::name)
+            .collect();
         let log_revspec = if auto_upstream && !revspec.is_empty() {
-            let remotes: Vec<&str> = ref_map
-                .values()
-                .flatten()
-                .filter(|r| matches!(r, Ref::RemoteBranch { .. }))
-                .map(Ref::name)
-                .collect();
             with_upstreams(revspec, &head, &load_upstreams(path), &remotes)
         } else {
             revspec.to_vec()
         };
+        let remote_targets = remote_targets(&log_revspec, &remotes);
         let commits = load_all_commits(
             path,
             sort,
@@ -233,7 +237,7 @@ impl Repository {
         };
         let revspec_tips = load_revspec_tips(path, revspec);
 
-        Ok(Self::new(
+        let mut repository = Self::new(
             path.to_path_buf(),
             commit_map,
             parents_map,
@@ -243,7 +247,9 @@ impl Repository {
             commit_hashes,
             merge_base,
             revspec_tips,
-        ))
+        );
+        repository.remote_targets = remote_targets;
+        Ok(repository)
     }
 
     pub fn new(
@@ -267,6 +273,7 @@ impl Repository {
             commit_hashes,
             merge_base,
             revspec_tips,
+            remote_targets: Vec::new(),
         }
     }
 
@@ -312,6 +319,13 @@ impl Repository {
 
     /// The commit each plain revision in the revspec resolves to, in the order given. Empty
     /// unless the revspec named two or more; a commit here is not necessarily rendered.
+    /// The remote branches worth fetching to keep the view current: each one the revspec names,
+    /// and each upstream it brought in. Empty without a revspec, so the default view, which shows
+    /// every remote, never fetches on its own.
+    pub fn remote_targets(&self) -> &[String] {
+        &self.remote_targets
+    }
+
     pub fn revspec_tips(&self) -> &[CommitHash] {
         &self.revspec_tips
     }
@@ -432,6 +446,31 @@ fn with_upstreams(
 
     expanded.extend_from_slice(&revspec[revisions.len()..]);
     expanded
+}
+
+/// The remote branches `log_revspec` includes by name, in order and without repeats. Only a bare
+/// name counts, as for [`with_upstreams`]: a range, a modifier or an exclusion does not ask to see
+/// the branch move, so fetching it would only spend a round trip.
+fn remote_targets(log_revspec: &[String], remotes: &[&str]) -> Vec<String> {
+    let mut targets: Vec<String> = Vec::new();
+    let mut excluding = false;
+    for rev in revision_args(log_revspec) {
+        if rev == "--not" {
+            excluding = !excluding;
+            continue;
+        }
+        if excluding {
+            continue;
+        }
+        let name = rev
+            .strip_prefix("refs/remotes/")
+            .or_else(|| rev.strip_prefix("remotes/"))
+            .unwrap_or(rev);
+        if remotes.contains(&name) && !targets.iter().any(|t| t == name) {
+            targets.push(name.to_string());
+        }
+    }
+    targets
 }
 
 /// Each local branch's upstream, keyed by branch name, for the upstreams that are remote branches.
@@ -1239,6 +1278,27 @@ mod tests {
                 "origin/topic"
             ]
         );
+    }
+
+    #[test]
+    fn test_remote_targets_are_the_remote_branches_named_outright() {
+        let remotes = ["origin/main", "origin/topic", "fork/x"];
+        assert_eq!(
+            remote_targets(
+                &revspec(&[
+                    "main",
+                    "origin/main",
+                    "refs/remotes/fork/x",
+                    "origin/main",
+                    "origin/topic~1",
+                    "--not",
+                    "origin/topic",
+                ]),
+                &remotes,
+            ),
+            ["origin/main", "fork/x"]
+        );
+        assert!(remote_targets(&revspec(&["main", "--", "origin/main"]), &remotes).is_empty());
     }
 
     #[test]
