@@ -38,6 +38,9 @@ pub struct ColorTheme {
     pub list_marker_tip_fg: RatatuiColor,
     #[default(RatatuiColor::Yellow)]
     pub list_marker_head_fg: RatatuiColor,
+    // the same red as a remote branch's ref label, so the marker reads as that ref
+    #[default(RatatuiColor::Red)]
+    pub list_marker_remote_fg: RatatuiColor,
     #[default(RatatuiColor::Reset)]
     pub list_subject_fg: RatatuiColor,
     #[default(RatatuiColor::Cyan)]

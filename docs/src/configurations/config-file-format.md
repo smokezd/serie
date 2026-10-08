@@ -9,6 +9,7 @@ order = "chrono"
 graph_width = "auto"
 graph_style = "rounded"
 initial_selection = "latest"
+auto_upstream = true
 
 [core.git]
 mailmap = false
@@ -76,6 +77,7 @@ list_head_fg = "cyan"
 list_marker_base_fg = "white"
 list_marker_tip_fg = "cyan"
 list_marker_head_fg = "yellow"
+list_marker_remote_fg = "red"
 list_subject_fg = "reset"
 list_name_fg = "cyan"
 list_hash_fg = "yellow"

@@ -154,7 +154,8 @@ pub struct Repository {
 
 impl Repository {
     /// Loads the commits reachable from `revspec`, or from every branch, remote branch, tag and
-    /// stash when `revspec` is empty.
+    /// stash when `revspec` is empty. With `auto_upstream`, a local branch named in `revspec` also
+    /// brings in its upstream remote branch; see [`with_upstreams`].
     pub fn load(
         path: &Path,
         sort: SortCommit,
@@ -162,6 +163,7 @@ impl Repository {
         mailmap: bool,
         revspec: &[String],
         include_uncommitted: bool,
+        auto_upstream: bool,
     ) -> Result<Self> {
         check_git_repository(path)?;
 
@@ -174,7 +176,28 @@ impl Repository {
         } else {
             Vec::new()
         };
-        let commits = load_all_commits(path, sort, &head, &stashes, max_count, mailmap, revspec)?;
+        // Only what `git log` walks is widened: the merge base, the tips and the status line label
+        // all keep reading the revspec as typed, so `serie master topic` still names two revisions.
+        let log_revspec = if auto_upstream && !revspec.is_empty() {
+            let remotes: Vec<&str> = ref_map
+                .values()
+                .flatten()
+                .filter(|r| matches!(r, Ref::RemoteBranch { .. }))
+                .map(Ref::name)
+                .collect();
+            with_upstreams(revspec, &head, &load_upstreams(path), &remotes)
+        } else {
+            revspec.to_vec()
+        };
+        let commits = load_all_commits(
+            path,
+            sort,
+            &head,
+            &stashes,
+            max_count,
+            mailmap,
+            &log_revspec,
+        )?;
         if commits.is_empty() {
             return Err(no_commits_error(revspec));
         }
@@ -356,6 +379,84 @@ fn plain_revisions(revspec: &[String]) -> Vec<&str> {
         .iter()
         .map(String::as_str)
         .filter(|rev| !(rev.starts_with('-') || rev.starts_with('^') || rev.contains("..")))
+        .collect()
+}
+
+/// The revspec as `git log` should walk it: each local branch it names, by itself or as `HEAD`
+/// while HEAD is on that branch, is followed by the branch's upstream remote branch, so
+/// `serie main` also shows where `origin/main` has got to.
+///
+/// Only a bare branch name counts. A modifier (`main~2`) names a commit rather than the branch, an
+/// exclusion (`^main`, or anything after `--not`) and a range (`main..topic`) say what to leave out,
+/// and widening any of them would change what the user asked for. The upstream goes directly after
+/// its branch, so a later `--not` cannot catch it. An upstream that is missing from `remotes` (gone
+/// from the remote, or never fetched) is skipped rather than handed to `git log` to fail on.
+fn with_upstreams(
+    revspec: &[String],
+    head: &Head,
+    upstreams: &FxHashMap<String, String>,
+    remotes: &[&str],
+) -> Vec<String> {
+    let revisions = revision_args(revspec);
+    let mut expanded: Vec<String> = Vec::with_capacity(revspec.len());
+    let mut excluding = false;
+
+    for rev in revisions {
+        expanded.push(rev.clone());
+        if rev == "--not" {
+            // `--not` flips every revision after it, and a second one flips them back
+            excluding = !excluding;
+        }
+        if excluding {
+            continue;
+        }
+
+        let branch = match rev.as_str() {
+            "HEAD" => match head {
+                Head::Branch { name } => name.as_str(),
+                _ => continue,
+            },
+            rev => rev
+                .strip_prefix("refs/heads/")
+                .or_else(|| rev.strip_prefix("heads/"))
+                .unwrap_or(rev),
+        };
+        let Some(upstream) = upstreams.get(branch) else {
+            continue;
+        };
+        let already_named = revisions.iter().chain(&expanded).any(|r| r == upstream);
+        if remotes.contains(&upstream.as_str()) && !already_named {
+            expanded.push(upstream.clone());
+        }
+    }
+
+    expanded.extend_from_slice(&revspec[revisions.len()..]);
+    expanded
+}
+
+/// Each local branch's upstream, keyed by branch name, for the upstreams that are remote branches.
+/// An upstream on the local repository itself (`branch.<name>.remote = .`) is another local branch,
+/// not a remote one, so it is left out.
+fn load_upstreams(path: &Path) -> FxHashMap<String, String> {
+    let Ok(output) = Command::new("git")
+        .arg("for-each-ref")
+        .arg("--format=%(refname)%1f%(upstream)")
+        .arg("refs/heads")
+        .current_dir(path)
+        .output()
+    else {
+        return FxHashMap::default();
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let (branch, upstream) = line.split_once('\x1f')?;
+            // the full refname, since `:short` turns `main` into `heads/main` when a tag shares
+            // its name
+            let branch = branch.strip_prefix("refs/heads/")?;
+            let remote = upstream.strip_prefix("refs/remotes/")?;
+            Some((branch.to_string(), remote.to_string()))
+        })
         .collect()
 }
 
@@ -1104,6 +1205,67 @@ mod tests {
 
     fn revspec(args: &[&str]) -> Vec<String> {
         args.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    fn expand(args: &[&str], head: &Head) -> Vec<String> {
+        let upstreams = FxHashMap::from_iter([
+            ("main".to_string(), "origin/main".to_string()),
+            ("topic".to_string(), "origin/topic".to_string()),
+            ("gone".to_string(), "origin/gone".to_string()),
+        ]);
+        with_upstreams(
+            &revspec(args),
+            head,
+            &upstreams,
+            &["origin/main", "origin/topic"],
+        )
+    }
+
+    #[test]
+    fn test_with_upstreams_inserts_each_upstream_after_its_branch() {
+        assert_eq!(
+            expand(&["main", "topic"], &Head::None),
+            ["main", "origin/main", "topic", "origin/topic"]
+        );
+        assert_eq!(
+            expand(&["main", "--not", "topic", "--not", "topic"], &Head::None),
+            [
+                "main",
+                "origin/main",
+                "--not",
+                "topic",
+                "--not",
+                "topic",
+                "origin/topic"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_with_upstreams_leaves_pathspecs_alone() {
+        assert_eq!(
+            expand(&["main", "--", "topic"], &Head::None),
+            ["main", "origin/main", "--", "topic"]
+        );
+    }
+
+    #[test]
+    fn test_with_upstreams_does_not_repeat_an_upstream() {
+        let head = Head::Branch {
+            name: "main".into(),
+        };
+        assert_eq!(
+            expand(&["origin/main", "main", "HEAD"], &head),
+            ["origin/main", "main", "HEAD"]
+        );
+    }
+
+    #[test]
+    fn test_with_upstreams_skips_a_gone_upstream_and_a_detached_head() {
+        let detached = Head::Detached {
+            target: "abc".into(),
+        };
+        assert_eq!(expand(&["gone", "HEAD"], &detached), ["gone", "HEAD"]);
     }
 
     #[test]

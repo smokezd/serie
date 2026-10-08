@@ -104,6 +104,23 @@ impl<'a> GitRepository<'a> {
         self.run(&["stash", "--include-untracked"], &datetime_str);
     }
 
+    /// Makes `remote_branch` (`origin/<name>`) the upstream of `branch` without a real remote: the
+    /// remote-tracking ref is written straight to `rev`, and only the config that `@{upstream}`
+    /// reads is set. Passing `None` leaves the ref missing, as for an upstream gone from the remote.
+    pub(crate) fn set_upstream(&self, branch: &str, remote_branch: &str, rev: Option<&str>) {
+        let (remote, name) = remote_branch.split_once('/').unwrap();
+        let fetch = format!("+refs/heads/*:refs/remotes/{remote}/*");
+        self.run(&["config", &format!("remote.{remote}.url"), "."], "");
+        self.run(&["config", &format!("remote.{remote}.fetch"), &fetch], "");
+        self.run(&["config", &format!("branch.{branch}.remote"), remote], "");
+        let merge = format!("refs/heads/{name}");
+        self.run(&["config", &format!("branch.{branch}.merge"), &merge], "");
+        if let Some(rev) = rev {
+            let remote_ref = format!("refs/remotes/{remote_branch}");
+            self.run(&["update-ref", &remote_ref, rev], "");
+        }
+    }
+
     pub(crate) fn rev_parse_head(&self) -> String {
         let output = self.run(&["rev-parse", "HEAD"], "");
         String::from_utf8(output.stdout).unwrap().trim().to_string()

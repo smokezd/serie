@@ -35,6 +35,14 @@ exists in the working tree any more.
 Everything after the first `--` reaches `git log` untouched, and everything after a second one is
 treated as a path rather than a revision — not rewritten, and not marked as a branch tip.
 
+A local branch also brings in its upstream remote branch, so `serie main` renders `origin/main` as
+well and shows where it has diverged. This applies to a bare branch name (`main`, `heads/main` or
+`refs/heads/main`) and to `HEAD` while it is on a branch. A modifier (`main~2`), an exclusion
+(`^main`, or anything after `--not`) and a range (`main..topic`) are left as they are, and an
+upstream that has not been fetched or is gone from the remote is skipped. The upstream only adds
+commits: the merge base, the tip markers and the status line still follow the revspec as typed. See
+[`--no-auto-upstream`](#--auto-upstream---no-auto-upstream) to turn it off.
+
 When a revspec is given:
 
 - Stashes are not rendered, and refs that point outside the rendered commits are not listed.
@@ -65,14 +73,20 @@ marked: `serie -- master topic --all` still marks `master` and `topic`.
 
 The marker column is two cells wide. The first carries what the revspec asked about — the merge
 base (`◆`) or a tip's position (`1`, `2`, ...) — and the second carries HEAD (`@`), falling back to
-the lane tick. A commit that is both a tip and HEAD therefore shows both:
+the lane tick. When HEAD is not there, the second cell marks a remote branch tip (`○`) instead, so
+it is visible where each remote has got to. A commit that is both a tip and HEAD therefore shows
+both:
 
 ```
 1@  the revision you passed, and where you are
  @  where you are
 2│  another revision you passed
+ ○  a remote branch, such as the upstream brought in for a branch you passed
 ◆│  the merge base
 ```
+
+The remote marker is shown only when a revspec is given; the default view lists every remote, so it
+would mark nearly every branch tip there.
 
 The merge base and a tip share the first cell, and the base wins; the ordinal stays reachable with
 `go_to_next_tip`. HEAD is marked whether it is attached to a branch or detached.
@@ -80,6 +94,13 @@ The merge base and a tip share the first cell, and the base wins; the ordinal st
 The base is computed with `git merge-base`, so it is recomputed on refresh as the branches move.
 Ranges (`master..topic`), exclusions (`^master`) and `git log` flags opt out, since none of them
 names exactly two commits.
+
+## --auto-upstream, --no-auto-upstream
+
+Whether a local branch named in the revspec also brings in its upstream remote branch, as described
+under [`<REVSPEC>`](#revspec). On by default; `--no-auto-upstream` renders the revspec exactly as
+given. Whichever of the two comes last wins, and either one overrides `auto_upstream` in the config
+file.
 
 ## -n, --max-count \<NUMBER\>
 

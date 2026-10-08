@@ -82,6 +82,14 @@ struct Args {
     /// Hide local uncommitted changes, overriding `uncommitted` in the config
     #[arg(long = "no-uncommitted", overrides_with = "uncommitted")]
     no_uncommitted: bool,
+
+    /// Also render the upstream remote branch of each local branch in the revspec [default: on]
+    #[arg(long, overrides_with = "no_auto_upstream")]
+    auto_upstream: bool,
+
+    /// Render only the revspec as given, overriding `auto_upstream` in the config
+    #[arg(long = "no-auto-upstream", overrides_with = "auto_upstream")]
+    no_auto_upstream: bool,
 }
 
 /// `HEAD` is spelled in upper case in git, and only resolves in lower case on case-insensitive
@@ -288,6 +296,11 @@ fn main() -> Result<()> {
         (_, true) => false,
         _ => core_config.option.uncommitted.unwrap_or(false),
     };
+    let auto_upstream = match (args.auto_upstream, args.no_auto_upstream) {
+        (true, _) => true,
+        (_, true) => false,
+        _ => core_config.option.auto_upstream.unwrap_or(true),
+    };
 
     let graph_color_set = color::GraphColorSet::new(&graph_config.color);
 
@@ -314,6 +327,7 @@ fn main() -> Result<()> {
             mailmap,
             &revspec,
             include_uncommitted,
+            auto_upstream,
         ) {
             Ok(repository) => repository,
             Err(e) => break Err(e),

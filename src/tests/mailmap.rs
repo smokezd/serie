@@ -36,6 +36,7 @@ fn mailmap_enabled_rewrites_author_and_committer() -> TestResult {
         true,
         &[],
         false,
+        true,
     )?;
     let commits = repository.all_commits();
     let commit = commits.first().unwrap();
@@ -65,6 +66,7 @@ fn mailmap_disabled_keeps_raw_identity() -> TestResult {
         false,
         &[],
         false,
+        true,
     )?;
     let commits = repository.all_commits();
     let commit = commits.first().unwrap();
@@ -93,6 +95,7 @@ fn mailmap_enabled_without_mailmap_file_is_a_no_op() -> TestResult {
         true,
         &[],
         false,
+        true,
     )?;
     let commits = repository.all_commits();
     let commit = commits.first().unwrap();

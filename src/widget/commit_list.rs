@@ -37,6 +37,8 @@ pub struct CommitInfo<'a> {
     is_head: bool,
     /// 1-based position in the revspec when this commit is one of its tips.
     tip_ordinal: Option<usize>,
+    /// A remote branch points here, in a view scoped by a revspec.
+    is_remote_tip: bool,
 }
 
 impl<'a> CommitInfo<'a> {
@@ -47,6 +49,7 @@ impl<'a> CommitInfo<'a> {
         is_merge_base: bool,
         is_head: bool,
         tip_ordinal: Option<usize>,
+        is_remote_tip: bool,
     ) -> Self {
         Self {
             commit,
@@ -55,6 +58,7 @@ impl<'a> CommitInfo<'a> {
             is_merge_base,
             is_head,
             tip_ordinal,
+            is_remote_tip,
         }
     }
 }
@@ -1190,7 +1194,9 @@ impl CommitList<'_> {
 /// The two cells of the marker column, left then right.
 ///
 /// Slot 1 carries what the revspec asked about: the merge base, or a tip's position. Slot 2
-/// carries HEAD, falling back to the lane tick that divides the graph from the subject. Splitting
+/// carries HEAD, then a remote branch tip, falling back to the lane tick that divides the graph
+/// from the subject. HEAD outranks the remote because sitting on the remote's commit means being in
+/// sync with it, the least interesting thing the remote marker could say. Splitting
 /// them this way means being sat on one of the revisions you passed shows both facts at once,
 /// which is the normal case rather than the exotic one.
 ///
@@ -1211,6 +1217,8 @@ fn marker_cells(commit_info: &CommitInfo, color_theme: &ColorTheme) -> [MarkerCe
 
     let head_cell = if commit_info.is_head {
         MarkerCell::marker("@", color_theme.list_marker_head_fg)
+    } else if commit_info.is_remote_tip {
+        MarkerCell::marker("\u{25cb}", color_theme.list_marker_remote_fg) // ○
     } else {
         MarkerCell::tick(commit_info.graph_color)
     };
@@ -1566,6 +1574,7 @@ mod tests {
                     is_merge_base,
                     false,
                     None,
+                    false,
                 )
             })
             .collect();
@@ -2016,6 +2025,7 @@ mod tests {
             is_merge_base,
             is_head,
             tip,
+            false,
         );
         marker_cells(&info, &ColorTheme::default())
             .iter()
@@ -2046,6 +2056,23 @@ mod tests {
     }
 
     #[test]
+    fn test_remote_tip_takes_the_second_slot_unless_head_is_there() {
+        let commit = Commit::default();
+        let marker = |is_head, tip| {
+            let info =
+                CommitInfo::new(&commit, Vec::new(), Color::Reset, false, is_head, tip, true);
+            marker_cells(&info, &ColorTheme::default())
+                .iter()
+                .map(|cell| cell.symbol.clone())
+                .collect::<String>()
+        };
+        assert_eq!(marker(false, None), " \u{25cb}");
+        assert_eq!(marker(false, Some(1)), "1\u{25cb}");
+        // in sync with the remote is the least interesting case, so HEAD wins the slot
+        assert_eq!(marker(true, None), " @");
+    }
+
+    #[test]
     fn test_marker_falls_back_when_there_are_more_tips_than_digits() {
         assert_eq!(marker_of(false, Some(9), false), "9\u{2502}");
         assert_eq!(marker_of(false, Some(10), false), "\u{25b6}\u{2502}");
@@ -2054,7 +2081,15 @@ mod tests {
     #[test]
     fn test_only_markers_are_bold_not_the_lane_tick() {
         let commit = Commit::default();
-        let info = CommitInfo::new(&commit, Vec::new(), Color::Reset, false, false, Some(1));
+        let info = CommitInfo::new(
+            &commit,
+            Vec::new(),
+            Color::Reset,
+            false,
+            false,
+            Some(1),
+            false,
+        );
         let cells = marker_cells(&info, &ColorTheme::default());
         assert!(cells[0].bold, "a tip marker should stand out");
         assert!(!cells[1].bold, "the lane tick is a divider, not a marker");

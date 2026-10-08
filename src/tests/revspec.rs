@@ -26,6 +26,14 @@ fn init_branched_repository(repo_path: &Path) -> GitRepository<'_> {
 }
 
 fn load(repo_path: &Path, revspec: &[&str]) -> Result<Repository, Box<dyn std::error::Error>> {
+    load_with_upstream(repo_path, revspec, true)
+}
+
+fn load_with_upstream(
+    repo_path: &Path,
+    revspec: &[&str],
+    auto_upstream: bool,
+) -> Result<Repository, Box<dyn std::error::Error>> {
     let revspec: Vec<String> = revspec.iter().map(|s| s.to_string()).collect();
     Repository::load(
         repo_path,
@@ -34,7 +42,25 @@ fn load(repo_path: &Path, revspec: &[&str]) -> Result<Repository, Box<dyn std::e
         false,
         &revspec,
         false,
+        auto_upstream,
     )
+}
+
+// master: m1 -> m2, origin/master: m1 -> m2 -> r1
+// feature: m1 -> f1, origin/feature: m1 -> f1 -> rf1
+// HEAD on master
+fn init_repository_with_upstreams(repo_path: &Path) -> GitRepository<'_> {
+    let git = init_branched_repository(repo_path);
+    for (branch, remote_only) in [("master", "r1"), ("feature", "rf1")] {
+        git.checkout(branch);
+        git.checkout_b("ahead");
+        git.commit(remote_only, "2024-01-04");
+        git.set_upstream(branch, &format!("origin/{branch}"), Some("ahead"));
+        git.checkout(branch);
+        git.branch_d("ahead");
+    }
+    git.checkout("master");
+    git
 }
 
 fn subjects(repository: &Repository) -> Vec<String> {
@@ -306,6 +332,7 @@ fn a_hidden_graph_does_not_fail_a_narrow_refresh_and_keeps_its_width() {
         false,
         &[],
         false,
+        true,
     )
     .unwrap();
     let graph = calc_graph(&repository);
@@ -403,6 +430,7 @@ fn max_count_survives_a_pathspec_separator() -> TestResult {
         false,
         &revspec,
         false,
+        true,
     )?;
 
     assert_eq!(repository.all_commits().len(), 1);
@@ -423,4 +451,129 @@ fn unrelated_histories_are_distinguished_from_an_unscoped_revspec() -> TestResul
     let repository = load(dir.path(), &["master", "other"])?;
     assert_eq!(repository.merge_base(), &git::MergeBase::UnrelatedHistories);
     Ok(())
+}
+
+#[test]
+fn a_local_branch_brings_in_its_upstream() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    init_repository_with_upstreams(dir.path());
+
+    let repository = load(dir.path(), &["master"])?;
+
+    assert_eq!(subjects(&repository), ["m1", "m2", "r1"]);
+    assert_eq!(ref_names(&repository), ["master", "origin/master"]);
+    Ok(())
+}
+
+#[test]
+fn every_spelling_of_a_local_branch_brings_in_its_upstream() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    init_repository_with_upstreams(dir.path());
+
+    for rev in ["refs/heads/feature", "heads/feature"] {
+        let repository = load(dir.path(), &[rev])?;
+        assert_eq!(subjects(&repository), ["f1", "m1", "rf1"], "{rev}");
+    }
+    Ok(())
+}
+
+#[test]
+fn head_on_a_branch_brings_in_that_branch_upstream() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let git = init_repository_with_upstreams(dir.path());
+    git.checkout("feature");
+
+    let repository = load(dir.path(), &["HEAD"])?;
+
+    assert_eq!(subjects(&repository), ["f1", "m1", "rf1"]);
+    Ok(())
+}
+
+#[test]
+fn a_detached_head_brings_in_nothing() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let git = init_repository_with_upstreams(dir.path());
+    git.checkout("feature~0");
+
+    let repository = load(dir.path(), &["HEAD"])?;
+
+    assert_eq!(subjects(&repository), ["f1", "m1"]);
+    Ok(())
+}
+
+#[rstest]
+#[case::modifier(&["master~0"], &["m1", "m2"])]
+#[case::range(&["master..feature"], &["f1"])]
+#[case::exclusion(&["feature", "^master"], &["f1", "rf1"])]
+fn only_a_bare_branch_name_brings_in_its_upstream(
+    #[case] revspec: &[&str],
+    #[case] expected: &[&str],
+) -> TestResult {
+    let dir = tempfile::tempdir()?;
+    init_repository_with_upstreams(dir.path());
+
+    let repository = load(dir.path(), revspec)?;
+
+    assert_eq!(subjects(&repository), expected);
+    Ok(())
+}
+
+#[test]
+fn an_upstream_is_kept_on_the_include_side_of_not() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    init_repository_with_upstreams(dir.path());
+
+    // Appended at the end, origin/feature would land after `--not` and be excluded instead.
+    let repository = load(dir.path(), &["feature", "--not", "master"])?;
+
+    assert_eq!(subjects(&repository), ["f1", "rf1"]);
+    Ok(())
+}
+
+#[test]
+fn a_gone_upstream_is_skipped() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let git = init_branched_repository(dir.path());
+    git.set_upstream("master", "origin/master", None);
+
+    let repository = load(dir.path(), &["master"])?;
+
+    assert_eq!(subjects(&repository), ["m1", "m2"]);
+    Ok(())
+}
+
+#[test]
+fn upstreams_leave_the_merge_base_and_tips_to_the_revspec_as_typed() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    init_repository_with_upstreams(dir.path());
+
+    let repository = load(dir.path(), &["master", "feature"])?;
+
+    assert_eq!(subjects(&repository), ["f1", "m1", "m2", "r1", "rf1"]);
+    assert!(matches!(repository.merge_base(), git::MergeBase::Found(_)));
+    assert_eq!(repository.revspec_tips().len(), 2);
+    Ok(())
+}
+
+#[test]
+fn auto_upstream_off_renders_the_revspec_as_given() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    init_repository_with_upstreams(dir.path());
+
+    let repository = load_with_upstream(dir.path(), &["master"], false)?;
+
+    assert_eq!(subjects(&repository), ["m1", "m2"]);
+    Ok(())
+}
+
+#[test]
+fn each_auto_upstream_flag_sets_only_itself_and_the_last_wins() {
+    let none = Args::try_parse_from(["serie"]).unwrap();
+    assert!(!none.auto_upstream && !none.no_auto_upstream);
+
+    let off = Args::try_parse_from(["serie", "--auto-upstream", "--no-auto-upstream"]).unwrap();
+    assert!(!off.auto_upstream && off.no_auto_upstream);
+
+    let on = Args::try_parse_from(["serie", "--no-auto-upstream", "--auto-upstream"]).unwrap();
+    assert!(on.auto_upstream && !on.no_auto_upstream);
 }

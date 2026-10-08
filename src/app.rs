@@ -139,6 +139,7 @@ impl<'a> App<'a> {
                 .position(|tip| tip == hash)
                 .map(|i| i + 1)
         };
+        let scoped = ctx.revspec_label.is_some();
         let mut ref_name_to_commit_index_map = FxHashMap::default();
         let commits = graph
             .commits
@@ -155,6 +156,10 @@ impl<'a> App<'a> {
                     matches!(merge_base, MergeBase::Found(hash) if hash == &commit.commit_hash);
                 let is_head = head_hash.as_ref() == Some(&commit.commit_hash);
                 let tip_ordinal = tip_ordinal_of(&commit.commit_hash);
+                // The default view already lists every remote, so marking them all there would
+                // only add noise; a scoped view is where it matters which remotes made it in.
+                let is_remote_tip =
+                    scoped && refs.iter().any(|r| matches!(r, Ref::RemoteBranch { .. }));
                 CommitInfo::new(
                     commit,
                     refs,
@@ -162,6 +167,7 @@ impl<'a> App<'a> {
                     is_merge_base,
                     is_head,
                     tip_ordinal,
+                    is_remote_tip,
                 )
             })
             .collect();

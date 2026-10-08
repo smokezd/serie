@@ -132,6 +132,7 @@ pub struct CoreOptionConfig {
     pub graph_style: Option<GraphStyle>,
     pub initial_selection: Option<InitialSelection>,
     pub uncommitted: Option<bool>,
+    pub auto_upstream: Option<bool>,
 }
 
 #[optional(derives = [Deserialize])]
@@ -451,6 +452,7 @@ mod tests {
                     graph_style: None,
                     initial_selection: None,
                     uncommitted: None,
+                    auto_upstream: None,
                 },
                 git: CoreGitConfig { mailmap: false },
                 search: CoreSearchConfig {
@@ -539,6 +541,7 @@ mod tests {
             graph_style = "angular"
             initial_selection = "head"
             uncommitted = true
+            auto_upstream = false
             [core.git]
             mailmap = true
             [core.search]
@@ -585,6 +588,7 @@ mod tests {
                     graph_style: Some(GraphStyle::Angular),
                     initial_selection: Some(InitialSelection::Head),
                     uncommitted: Some(true),
+                    auto_upstream: Some(false),
                 },
                 git: CoreGitConfig { mailmap: true },
                 search: CoreSearchConfig {
@@ -699,6 +703,7 @@ mod tests {
                     graph_style: None,
                     initial_selection: None,
                     uncommitted: None,
+                    auto_upstream: None,
                 },
                 git: CoreGitConfig { mailmap: false },
                 search: CoreSearchConfig {

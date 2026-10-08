@@ -21,6 +21,7 @@ fn load_revspec(repo_path: &Path, revspec: &[&str], include_uncommitted: bool) -
         false,
         &revspec,
         include_uncommitted,
+        true,
     )
     .unwrap()
 }

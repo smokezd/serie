@@ -25,6 +25,7 @@ fn render(repo_path: &std::path::Path, style: TextStyle) -> String {
         false,
         &[],
         false,
+        true,
     )
     .unwrap();
     let graph = calc_graph(&repository);
@@ -141,6 +142,7 @@ fn test_lanes_stay_aligned_across_rows() -> TestResult {
         false,
         &[],
         false,
+        true,
     )?;
     let graph = calc_graph(&repository);
     let width = text_graph_width(&graph);

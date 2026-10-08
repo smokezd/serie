@@ -67,6 +67,11 @@
               "type": "boolean",
               "description": "Show local uncommitted changes as staged/unstaged rows above HEAD. The command line arguments --uncommitted and --no-uncommitted take precedence.",
               "default": false
+            },
+            "auto_upstream": {
+              "type": "boolean",
+              "description": "When the revspec names a local branch (or HEAD on a branch), also render its upstream remote branch. The command line arguments --auto-upstream and --no-auto-upstream take precedence.",
+              "default": true
             }
           },
           "additionalProperties": false
@@ -460,6 +465,11 @@
           "type": "string",
           "description": "Color for the marker on the HEAD commit in the commit list.",
           "default": "yellow"
+        },
+        "list_marker_remote_fg": {
+          "type": "string",
+          "description": "Color for the marker on a remote branch tip in the commit list, shown when a revspec is given.",
+          "default": "red"
         },
         "list_subject_fg": {
           "type": "string",
