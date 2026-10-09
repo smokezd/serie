@@ -124,6 +124,31 @@ A fetch never prompts: it fails quietly when credentials would be needed, and is
 next round. `--no-auto-fetch` turns it off; whichever of the two comes last wins, and either one
 overrides `auto_fetch` in the config file.
 
+## --hunk-bin \<PATH\>
+
+The `hunk` binary run by the `hunkdiff_show`, `hunkdiff_diff_to_head` and
+`hunkdiff_diff_through_worktree` keybindings. Defaults to `hunk`, looked up on `PATH`; give a path to
+run a specific build instead.
+
+## --hunk-arg \<ARG\>
+
+An extra argument for every `hunk` run by those keybindings. Repeat the option once per argument; a
+value may start with `-`, so `--hunk-arg --watch` passes `--watch` rather than being read as an
+option of its own.
+
+The arguments go after the subcommand and its own flags, and before the revision:
+
+```
+$ serie --hunk-bin ~/.local/bin/hunk --hunk-arg --watch HEAD
+# on a commit:         ~/.local/bin/hunk diff --watch <hash>..HEAD
+# on the staged row:   ~/.local/bin/hunk diff --staged --watch
+```
+
+Each `--hunk-arg` takes exactly one value, so it can sit anywhere among the other options and the
+revspec: `serie --hunk-arg --watch -n 300 HEAD` and `serie -n 300 HEAD --hunk-arg --watch` are the
+same. A value that is itself an option taking a value, such as `--agent-context`, needs its own
+`--hunk-arg` for that value: `--hunk-arg --agent-context --hunk-arg /path/to/context.json`.
+
 ## -n, --max-count \<NUMBER\>
 
 Maximum number of commits to render.

@@ -188,7 +188,10 @@ mod tests {
         git.init();
         git.commit("c1", "2024-01-01");
 
-        let before = (fingerprint(dir.path(), false), fingerprint(dir.path(), true));
+        let before = (
+            fingerprint(dir.path(), false),
+            fingerprint(dir.path(), true),
+        );
         git.write_file("new.txt", "x");
         assert_eq!(fingerprint(dir.path(), false), before.0);
         assert_ne!(fingerprint(dir.path(), true), before.1);

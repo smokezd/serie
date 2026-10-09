@@ -83,6 +83,16 @@ pub struct AppContext {
     /// The revspec the log was scoped to, shown in the status line so that a filtered view is
     /// not mistaken for the whole repository. `None` when every ref is rendered.
     pub revspec_label: Option<String>,
+    pub hunk: HunkCommand,
+}
+
+/// How to launch `hunk` from a row, as given by `--hunk-bin` and `--hunk-arg`.
+#[derive(Debug, Clone)]
+pub struct HunkCommand {
+    /// The binary to run, looked up on `PATH` when it is a bare name.
+    pub bin: String,
+    /// Passed to every invocation after the subcommand and its own flags, before the revision.
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -758,7 +768,7 @@ impl App<'_> {
             _ => return,
         };
         let commit_hash = commit_list_state.selected_commit_hash().clone();
-        let command = hunkdiff_command(mode, &commit_hash);
+        let command = hunkdiff_command(&self.ctx.hunk, mode, &commit_hash);
 
         self.ec.suspend();
         let exec_result = exec_command_suspend(&command);
@@ -942,33 +952,39 @@ fn status_line_with_metadata(
 /// The `hunk` argv for `mode`, special-cased for the staged/unstaged pseudo-commits: neither
 /// is a real revision, so `hunk diff [--staged]` (no target) stands in for it directly rather
 /// than substituting a hash `hunk` could not resolve.
-fn hunkdiff_command(mode: HunkdiffMode, commit_hash: &CommitHash) -> Vec<String> {
+///
+/// The configured args go after the subcommand and its fixed flags but before the revision, so
+/// `--hunk-arg --watch` yields `hunk diff --staged --watch` and `hunk diff --watch <hash>..HEAD`.
+fn hunkdiff_command(
+    hunk: &HunkCommand,
+    mode: HunkdiffMode,
+    commit_hash: &CommitHash,
+) -> Vec<String> {
     let hash = commit_hash.as_str();
 
-    if hash == STAGED_COMMIT_HASH {
+    let (subcommand, revision): (&[&str], Option<String>) = if hash == STAGED_COMMIT_HASH {
         // "Show" and "diff to HEAD" both mean the staged snapshot itself; "through worktree"
         // means whatever is layered on top of it, i.e. the unstaged diff.
-        return match mode {
-            HunkdiffMode::Show | HunkdiffMode::DiffToHead => {
-                vec!["hunk".into(), "diff".into(), "--staged".into()]
-            }
-            HunkdiffMode::DiffThroughWorktree => vec!["hunk".into(), "diff".into()],
-        };
-    }
-    if hash == UNSTAGED_COMMIT_HASH {
+        match mode {
+            HunkdiffMode::Show | HunkdiffMode::DiffToHead => (&["diff", "--staged"], None),
+            HunkdiffMode::DiffThroughWorktree => (&["diff"], None),
+        }
+    } else if hash == UNSTAGED_COMMIT_HASH {
         // Nothing sits beyond the worktree, so every mode shows the same worktree diff.
-        return vec!["hunk".into(), "diff".into()];
-    }
+        (&["diff"], None)
+    } else {
+        match mode {
+            HunkdiffMode::Show => (&["show"], Some(hash.into())),
+            HunkdiffMode::DiffToHead => (&["diff"], Some(format!("{hash}..HEAD"))),
+            HunkdiffMode::DiffThroughWorktree => (&["diff"], Some(hash.into())),
+        }
+    };
 
-    match mode {
-        HunkdiffMode::Show => vec!["hunk".into(), "show".into(), hash.into()],
-        HunkdiffMode::DiffToHead => {
-            vec!["hunk".into(), "diff".into(), format!("{hash}..HEAD")]
-        }
-        HunkdiffMode::DiffThroughWorktree => {
-            vec!["hunk".into(), "diff".into(), hash.into()]
-        }
-    }
+    std::iter::once(hunk.bin.clone())
+        .chain(subcommand.iter().map(|s| s.to_string()))
+        .chain(hunk.args.iter().cloned())
+        .chain(revision)
+        .collect()
 }
 
 fn selected_commit_details(
@@ -1086,20 +1102,35 @@ mod tests {
 
     use super::*;
 
+    fn default_hunk() -> HunkCommand {
+        HunkCommand {
+            bin: "hunk".into(),
+            args: vec![],
+        }
+    }
+
+    fn hunk_with_args() -> HunkCommand {
+        HunkCommand {
+            bin: "/x/hunk".into(),
+            args: vec!["--watch".into(), "--agent-context".into(), "/p.json".into()],
+        }
+    }
+
     #[test]
     fn hunkdiff_command_targets_a_real_commit_by_hash() {
         let hash: CommitHash = "abc123".into();
+        let hunk = default_hunk();
 
         assert_eq!(
-            hunkdiff_command(HunkdiffMode::Show, &hash),
+            hunkdiff_command(&hunk, HunkdiffMode::Show, &hash),
             ["hunk", "show", "abc123"]
         );
         assert_eq!(
-            hunkdiff_command(HunkdiffMode::DiffToHead, &hash),
+            hunkdiff_command(&hunk, HunkdiffMode::DiffToHead, &hash),
             ["hunk", "diff", "abc123..HEAD"]
         );
         assert_eq!(
-            hunkdiff_command(HunkdiffMode::DiffThroughWorktree, &hash),
+            hunkdiff_command(&hunk, HunkdiffMode::DiffThroughWorktree, &hash),
             ["hunk", "diff", "abc123"]
         );
     }
@@ -1107,19 +1138,20 @@ mod tests {
     #[test]
     fn hunkdiff_command_falls_back_to_staged_diff_for_the_staged_pseudo_commit() {
         let hash: CommitHash = STAGED_COMMIT_HASH.into();
+        let hunk = default_hunk();
 
         // "show" and "diff to HEAD" both mean the staged snapshot itself.
         assert_eq!(
-            hunkdiff_command(HunkdiffMode::Show, &hash),
+            hunkdiff_command(&hunk, HunkdiffMode::Show, &hash),
             ["hunk", "diff", "--staged"]
         );
         assert_eq!(
-            hunkdiff_command(HunkdiffMode::DiffToHead, &hash),
+            hunkdiff_command(&hunk, HunkdiffMode::DiffToHead, &hash),
             ["hunk", "diff", "--staged"]
         );
         // "through worktree" means what's layered on top: the unstaged diff.
         assert_eq!(
-            hunkdiff_command(HunkdiffMode::DiffThroughWorktree, &hash),
+            hunkdiff_command(&hunk, HunkdiffMode::DiffThroughWorktree, &hash),
             ["hunk", "diff"]
         );
     }
@@ -1133,8 +1165,51 @@ mod tests {
             HunkdiffMode::DiffToHead,
             HunkdiffMode::DiffThroughWorktree,
         ] {
-            assert_eq!(hunkdiff_command(mode, &hash), ["hunk", "diff"]);
+            assert_eq!(
+                hunkdiff_command(&default_hunk(), mode, &hash),
+                ["hunk", "diff"]
+            );
         }
+    }
+
+    #[test]
+    fn hunkdiff_command_runs_the_configured_binary() {
+        let hunk = HunkCommand {
+            bin: "/x/hunk".into(),
+            args: vec![],
+        };
+
+        assert_eq!(
+            hunkdiff_command(&hunk, HunkdiffMode::Show, &"abc123".into()),
+            ["/x/hunk", "show", "abc123"]
+        );
+        assert_eq!(
+            hunkdiff_command(&hunk, HunkdiffMode::Show, &STAGED_COMMIT_HASH.into()),
+            ["/x/hunk", "diff", "--staged"]
+        );
+        assert_eq!(
+            hunkdiff_command(&hunk, HunkdiffMode::Show, &UNSTAGED_COMMIT_HASH.into()),
+            ["/x/hunk", "diff"]
+        );
+    }
+
+    #[rustfmt::skip]
+    #[rstest]
+    #[case(HunkdiffMode::Show,                "abc123",             &["/x/hunk", "show", "--watch", "--agent-context", "/p.json", "abc123"])]
+    #[case(HunkdiffMode::DiffToHead,          "abc123",             &["/x/hunk", "diff", "--watch", "--agent-context", "/p.json", "abc123..HEAD"])]
+    #[case(HunkdiffMode::DiffThroughWorktree, "abc123",             &["/x/hunk", "diff", "--watch", "--agent-context", "/p.json", "abc123"])]
+    #[case(HunkdiffMode::Show,                STAGED_COMMIT_HASH,   &["/x/hunk", "diff", "--staged", "--watch", "--agent-context", "/p.json"])]
+    #[case(HunkdiffMode::DiffToHead,          STAGED_COMMIT_HASH,   &["/x/hunk", "diff", "--staged", "--watch", "--agent-context", "/p.json"])]
+    #[case(HunkdiffMode::DiffThroughWorktree, STAGED_COMMIT_HASH,   &["/x/hunk", "diff", "--watch", "--agent-context", "/p.json"])]
+    #[case(HunkdiffMode::Show,                UNSTAGED_COMMIT_HASH, &["/x/hunk", "diff", "--watch", "--agent-context", "/p.json"])]
+    #[case(HunkdiffMode::DiffToHead,          UNSTAGED_COMMIT_HASH, &["/x/hunk", "diff", "--watch", "--agent-context", "/p.json"])]
+    #[case(HunkdiffMode::DiffThroughWorktree, UNSTAGED_COMMIT_HASH, &["/x/hunk", "diff", "--watch", "--agent-context", "/p.json"])]
+    fn hunkdiff_command_places_the_hunk_args_after_the_subcommand_flags_and_before_the_revision(
+        #[case] mode: HunkdiffMode,
+        #[case] hash: &str,
+        #[case] expected: &[&str],
+    ) {
+        assert_eq!(hunkdiff_command(&hunk_with_args(), mode, &hash.into()), expected);
     }
 
     #[rustfmt::skip]

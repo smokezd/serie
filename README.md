@@ -87,6 +87,16 @@ Options:
   -g, --graph-width <TYPE>        Commit graph image cell width; only `hidden` applies to a text style [default: auto] [possible values: auto, double, single, hidden]
   -s, --graph-style <TYPE>        Commit graph style: image edges, or text [default: rounded] [possible values: rounded, angular, ascii, unicode]
   -i, --initial-selection <TYPE>  Initial selection of commit [default: latest] [possible values: latest, head]
+      --uncommitted               Show local uncommitted changes as staged/unstaged rows above HEAD
+      --no-uncommitted            Hide local uncommitted changes, overriding `uncommitted` in the config
+      --auto-upstream             Also render the upstream remote branch of each local branch in the revspec [default: on]
+      --no-auto-upstream          Render only the revspec as given, overriding `auto_upstream` in the config
+      --auto-refresh              Refresh when the local repository changes, checked every 20 seconds [default: on]
+      --no-auto-refresh           Refresh only on request, overriding `auto_refresh` in the config
+      --auto-fetch                Fetch the remote branches in the revspec every 60 seconds [default: on]
+      --no-auto-fetch             Never fetch in the background, overriding `auto_fetch` in the config
+      --hunk-bin <PATH>           The `hunk` binary the hunkdiff keybindings run [default: hunk]
+      --hunk-arg <ARG>            Extra argument for every `hunk` run, placed before the revision; repeat for more (`--hunk-arg --watch`)
   -h, --help                      Print help (see more with '--help')
   -V, --version                   Print version
 ```

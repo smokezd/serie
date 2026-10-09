@@ -305,6 +305,48 @@ fn options_are_parsed_before_and_after_the_revspec() {
 }
 
 #[test]
+fn hunk_bin_defaults_to_hunk_on_path() {
+    let args = Args::try_parse_from(["serie", "HEAD"]).unwrap();
+
+    assert_eq!(args.hunk_bin, "hunk");
+    assert!(args.hunk_args.is_empty());
+}
+
+#[test]
+fn hunk_args_after_the_revspec_take_hyphenated_values_without_swallowing_it() {
+    let args = Args::try_parse_from([
+        "serie",
+        "-n",
+        "300",
+        "HEAD",
+        "--hunk-arg",
+        "--watch",
+        "--hunk-arg",
+        "--agent-context",
+        "--hunk-arg",
+        "/p.json",
+        "--hunk-bin",
+        "/x/hunk",
+    ])
+    .unwrap();
+
+    assert_eq!(args.max_count, Some(300));
+    assert_eq!(args.revspec, ["HEAD"]);
+    assert_eq!(args.hunk_args, ["--watch", "--agent-context", "/p.json"]);
+    assert_eq!(args.hunk_bin, "/x/hunk");
+}
+
+#[test]
+fn hunk_args_before_the_revspec_leave_the_following_options_alone() {
+    let args =
+        Args::try_parse_from(["serie", "--hunk-arg", "--watch", "-n", "300", "HEAD"]).unwrap();
+
+    assert_eq!(args.hunk_args, ["--watch"]);
+    assert_eq!(args.max_count, Some(300));
+    assert_eq!(args.revspec, ["HEAD"]);
+}
+
+#[test]
 fn a_hidden_graph_does_not_fail_a_narrow_refresh_and_keeps_its_width() {
     use crate::check::decide_graph_display;
     use crate::graph::{calc_graph, CellWidthType, GraphRenderer, GraphStyle};

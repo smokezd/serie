@@ -107,6 +107,15 @@ struct Args {
     /// Never fetch in the background, overriding `auto_fetch` in the config
     #[arg(long = "no-auto-fetch", overrides_with = "auto_fetch")]
     no_auto_fetch: bool,
+
+    /// The `hunk` binary the hunkdiff keybindings run
+    #[arg(long, value_name = "PATH", default_value = "hunk")]
+    hunk_bin: String,
+
+    /// Extra argument for every `hunk` run, placed before the revision; repeat for more
+    /// (`--hunk-arg --watch`)
+    #[arg(long = "hunk-arg", value_name = "ARG", allow_hyphen_values = true)]
+    hunk_args: Vec<String>,
 }
 
 /// `HEAD` is spelled in upper case in git, and only resolves in lower case on case-insensitive
@@ -338,6 +347,10 @@ fn main() -> Result<()> {
         color_theme,
         image_protocol,
         revspec_label: (!revspec.is_empty()).then(|| revspec.join(" ")),
+        hunk: app::HunkCommand {
+            bin: args.hunk_bin,
+            args: args.hunk_args,
+        },
     });
 
     let ec = event::EventController::init();
